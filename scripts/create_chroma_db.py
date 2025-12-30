@@ -1,15 +1,15 @@
 import os
 import shutil
+from typing import Optional
 
 from dotenv import load_dotenv
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader
-from langchain_openai import OpenAIEmbeddings
+from langchain_community.embeddings import HuggingFaceBgeEmbeddings
 
 # Load environment variables from the .env file
 load_dotenv()
-
 
 def create_chroma_db(
     folder_path: str,
@@ -17,8 +17,23 @@ def create_chroma_db(
     delete_chroma_db: bool = True,
     chunk_size: int = 2000,
     overlap: int = 500,
+    embedding_model_name: str = "BAAI/bge-m3",
+    device: Optional[str] = None,
+    normalize_embeddings: bool = True,
 ):
-    embeddings = OpenAIEmbeddings(api_key=os.environ["OPENAI_API_KEY"])
+    """
+    Build a Chroma DB using a local/OSS embedding model (default: BAAI/bge-m3).
+    """
+    model_kwargs = {}
+    resolved_device = device or os.getenv("EMBEDDING_DEVICE", "cpu")
+    if resolved_device:
+        model_kwargs["device"] = resolved_device
+
+    embeddings = HuggingFaceBgeEmbeddings(
+        model_name=embedding_model_name,
+        model_kwargs=model_kwargs,
+        encode_kwargs={"normalize_embeddings": normalize_embeddings},
+    )
 
     # Initialize Chroma vector store
     if delete_chroma_db and os.path.exists(db_name):

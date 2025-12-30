@@ -1,10 +1,13 @@
 import math
 import re
+import os
 
 import numexpr
+from typing import Optional
 from langchain_chroma import Chroma
 from langchain_core.tools import BaseTool, tool
 from langchain_openai import OpenAIEmbeddings
+from langchain_community.embeddings import HuggingFaceBgeEmbeddings
 
 
 def calculator_func(expression: str) -> str:
@@ -47,13 +50,22 @@ def format_contexts(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
 
-def load_chroma_db():
+def load_chroma_db(device: Optional[str] = None, embedding_model_name: str = "BAAI/bge-m3", normalize_embeddings: bool = True):
     # Create the embedding function for our project description database
     try:
-        embeddings = OpenAIEmbeddings()
+        model_kwargs = {}
+        resolved_device = os.getenv("EMBEDDING_DEVICE", "cpu")
+        if resolved_device:
+            model_kwargs["device"] = resolved_device
+
+        embeddings = HuggingFaceBgeEmbeddings(
+            model_name=embedding_model_name,
+            model_kwargs=model_kwargs,
+            encode_kwargs={"normalize_embeddings": normalize_embeddings},
+        )
     except Exception as e:
         raise RuntimeError(
-            "Failed to initialize OpenAIEmbeddings. Ensure the OpenAI API key is set."
+            "Failed to initialize BgeEmbeddings."
         ) from e
 
     # Load the stored vector database

@@ -54,7 +54,7 @@ agents: dict[str, Agent] = {
         description="An agent the uses interrupts.", graph_like=interrupt_agent
     ),
     "knowledge-base-agent": Agent(
-        description="A retrieval-augmented generation agent using Amazon Bedrock Knowledge Base",
+        description="A retrieval-augmented generation agent using Milvus",
         graph_like=kb_agent,
     ),
     "github-mcp-agent": Agent(

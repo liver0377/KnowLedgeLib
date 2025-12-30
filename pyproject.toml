@@ -57,6 +57,8 @@ dependencies = [
     "uvicorn ~=0.32.1",
     "langchain-mcp-adapters>=0.1.10",
     "ddgs>=9.9.1",
+    "sentence-transformers>=5.2.0",
+    "langchain-milvus>=0.3.2",
 ]
 
 [dependency-groups]

@@ -1,8 +1,10 @@
 import logging
 import os
-from typing import Any
+from typing import Any, Optional
 
-from langchain_aws import AmazonKnowledgeBasesRetriever
+# from langchain_aws import AmazonKnowledgeBasesRetriever
+from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+from langchain_milvus import Milvus
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig, RunnableLambda, RunnableSerializable
@@ -25,25 +27,64 @@ class AgentState(MessagesState, total=False):
 
 
 # Create the retriever
-def get_kb_retriever():
-    """Create and return a Knowledge Base retriever instance."""
-    # Get the Knowledge Base ID from environment
-    kb_id = os.environ.get("AWS_KB_ID", "")
-    if not kb_id:
-        raise ValueError("AWS_KB_ID environment variable must be set")
+# def get_kb_retriever():
+#     """Create and return a Knowledge Base retriever instance."""
+#     # Get the Knowledge Base ID from environment
+#     kb_id = os.environ.get("AWS_KB_ID", "")
+#     if not kb_id:
+#         raise ValueError("AWS_KB_ID environment variable must be set")
 
-    # Create the retriever with the specified Knowledge Base ID
-    retriever = AmazonKnowledgeBasesRetriever(
-        knowledge_base_id=kb_id,
-        retrieval_config={
-            "vectorSearchConfiguration": {
-                "numberOfResults": 3,
-            }
-        },
+#     # Create the retriever with the specified Knowledge Base ID
+#     retriever = AmazonKnowledgeBasesRetriever(
+#         knowledge_base_id=kb_id,
+#         retrieval_config={
+#             "vectorSearchConfiguration": {
+#                 "numberOfResults": 3,
+#             }
+#         },
+#     )
+#     return retriever
+
+# Cerate the retriever
+def get_kb_retriever(
+    embedding_model_name: str = "BAAI/bge-m3",
+    device: Optional[str] = None,
+    normalize_embeddings: bool = True,):
+    """
+    创建一个Milvus retriever 实例, 使用BGE Embedding
+    """
+    milvus_uri = os.environ["MILVUS_URI"]
+    if not milvus_uri:
+        raise ValueError("MILVUS_URI environment variable must be set")
+    
+    collection_name = os.environ.get["MILVUS_COLLECTION"]
+    if not collection_name:
+        raise ValueError("MILVUS COLLECTION must be set")
+    
+    model_kwargs = {}
+    resolved_device = device or os.getenv("EMBEDDING_DEVICE", "cpu")
+    if resolved_device:
+        model_kwargs["device"] = resolved_device
+
+    embeddings = HuggingFaceBgeEmbeddings(
+        model_name=embedding_model_name,
+        model_kwargs=model_kwargs,
+        encode_kwargs={"normalize_embeddings": normalize_embeddings},
     )
-    return retriever
 
+    connection_args: dict[str, Any] = {"uri": milvus_uri}
+    if token := os.environ.get("MILVUS_TOKEN"):
+        connection_args["token"] = token
+    
+    vector_store = Milvus(
+        embedding_function=embeddings,
+        collection_name = collection_name,
+        connection_args=connection_args
+    )
 
+    return vector_store.as_retriever(search_kwargs={"k": 5})
+
+    
 def wrap_model(model: BaseChatModel) -> RunnableSerializable[AgentState, AIMessage]:
     """Wrap the model with a system prompt for the Knowledge Base agent."""
 
