@@ -1,0 +1,3 @@
+- 12.30
+  - 将OpenAIEmbedding替换成了BGEEmbedding
+  - 完成了milvus vector store的配置，将文档添加到milvus的数据库中
