@@ -3,7 +3,8 @@ import os
 from typing import Any, Optional
 
 # from langchain_aws import AmazonKnowledgeBasesRetriever
-from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+# from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_milvus import Milvus
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -22,28 +23,9 @@ class AgentState(MessagesState, total=False):
     """State for Knowledge Base agent."""
 
     remaining_steps: RemainingSteps
-    retrieved_documents: list[dict[str, Any]]
-    kb_documents: str
+    retrieved_documents: list[dict[str, Any]]  # 检索到的文档
+    kb_documents: str                          # 检索到的文档所对应的完整字符串
 
-
-# Create the retriever
-# def get_kb_retriever():
-#     """Create and return a Knowledge Base retriever instance."""
-#     # Get the Knowledge Base ID from environment
-#     kb_id = os.environ.get("AWS_KB_ID", "")
-#     if not kb_id:
-#         raise ValueError("AWS_KB_ID environment variable must be set")
-
-#     # Create the retriever with the specified Knowledge Base ID
-#     retriever = AmazonKnowledgeBasesRetriever(
-#         knowledge_base_id=kb_id,
-#         retrieval_config={
-#             "vectorSearchConfiguration": {
-#                 "numberOfResults": 3,
-#             }
-#         },
-#     )
-#     return retriever
 
 # Cerate the retriever
 def get_kb_retriever(
@@ -57,7 +39,7 @@ def get_kb_retriever(
     if not milvus_uri:
         raise ValueError("MILVUS_URI environment variable must be set")
     
-    collection_name = os.environ.get["MILVUS_COLLECTION"]
+    collection_name = os.environ.get("MILVUS_COLLECTION")
     if not collection_name:
         raise ValueError("MILVUS COLLECTION must be set")
     
@@ -66,7 +48,7 @@ def get_kb_retriever(
     if resolved_device:
         model_kwargs["device"] = resolved_device
 
-    embeddings = HuggingFaceBgeEmbeddings(
+    embeddings = HuggingFaceEmbeddings(
         model_name=embedding_model_name,
         model_kwargs=model_kwargs,
         encode_kwargs={"normalize_embeddings": normalize_embeddings},
@@ -78,7 +60,7 @@ def get_kb_retriever(
     
     vector_store = Milvus(
         embedding_function=embeddings,
-        collection_name = collection_name,
+        collection_name=collection_name,
         connection_args=connection_args
     )
 
@@ -89,19 +71,19 @@ def wrap_model(model: BaseChatModel) -> RunnableSerializable[AgentState, AIMessa
     """Wrap the model with a system prompt for the Knowledge Base agent."""
 
     def create_system_message(state):
-        base_prompt = """You are a helpful assistant that provides accurate information based on retrieved documents.
+        base_prompt = """你是一个乐于助人的助手，会基于检索到的文档提供准确的信息。
 
-        You will receive a query along with relevant documents retrieved from a knowledge base. Use these documents to inform your response.
+        你将收到一个查询，以及从知识库中检索到的相关文档。请使用这些文档来支撑你的回答。
 
-        Follow these guidelines:
-        1. Base your answer primarily on the retrieved documents
-        2. If the documents contain the answer, provide it clearly and concisely
-        3. If the documents are insufficient, state that you don't have enough information
-        4. Never make up facts or information not present in the documents
-        5. Always cite the source documents when referring to specific information
-        6. If the documents contradict each other, acknowledge this and explain the different perspectives
+        请遵循以下准则：
+        1. 你的回答应主要基于检索到的文档
+        2. 如果文档中包含答案，请清晰、简洁地给出
+        3. 如果文档信息不足，请说明你没有足够的信息
+        4. 绝不编造文档中不存在的事实或信息
+        5. 当引用具体信息时，务必标注来源文档
+        6. 如果文档之间存在矛盾，请承认并解释不同的观点
 
-        Format your response in a clear, conversational manner. Use markdown formatting when appropriate.
+        请以清晰、自然的对话方式组织回答；在合适的情况下使用 Markdown 格式。
         """
 
         # Check if documents were retrieved

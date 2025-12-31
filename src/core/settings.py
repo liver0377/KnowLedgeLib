@@ -76,7 +76,8 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8080
     GRACEFUL_SHUTDOWN_TIMEOUT: int = 30
-    LOG_LEVEL: LogLevel = LogLevel.WARNING
+    # LOG_LEVEL: LogLevel = LogLevel.WARNING
+    LOG_LEVEL: LogLevel = LogLevel.INFO
 
     AUTH_SECRET: SecretStr | None = None
 

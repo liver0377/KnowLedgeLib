@@ -59,6 +59,7 @@ dependencies = [
     "ddgs>=9.9.1",
     "sentence-transformers>=5.2.0",
     "langchain-milvus>=0.3.2",
+    "langchain-huggingface>=1.0.1",
 ]
 
 [dependency-groups]

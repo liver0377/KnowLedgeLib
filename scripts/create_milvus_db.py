@@ -147,7 +147,6 @@ def create_milvus_db(
     embeddings = HuggingFaceBgeEmbeddings(
         model_name=embedding_model_name,
         model_kwargs=model_kwargs,
-        query_instruction="Represent this sentence for searching relevant passages:",
         encode_kwargs={
             "normalize_embeddings": normalize_embeddings,
         },
