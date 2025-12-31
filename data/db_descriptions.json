@@ -1,0 +1,57 @@
+[
+  {
+    "table_name": "users",
+    "table_description": "用户信息表，存储注册用户的基本信息",
+    "columns": [
+      {"name": "id", "description": "用户唯一标识符，主键", "type": "INT"},
+      {"name": "name", "description": "用户姓名，不能为空", "type": "VARCHAR(100)"},
+      {"name": "email", "description": "用户邮箱地址，必须唯一", "type": "VARCHAR(150)"},
+      {"name": "age", "description": "用户年龄", "type": "INT"},
+      {"name": "created_at", "description": "用户注册时间", "type": "TIMESTAMP"}
+    ]
+  },
+  {
+    "table_name": "orders",
+    "table_description": "订单表，记录用户的购买订单信息",
+    "columns": [
+      {"name": "id", "description": "订单唯一标识符，主键", "type": "INT"},
+      {"name": "user_id", "description": "下单用户的ID，外键关联users表", "type": "INT"},
+      {"name": "product_name", "description": "购买的产品名称", "type": "VARCHAR(200)"},
+      {"name": "quantity", "description": "购买数量", "type": "INT"},
+      {"name": "price", "description": "订单总价格", "type": "DECIMAL(10,2)"},
+      {"name": "order_date", "description": "下单时间", "type": "TIMESTAMP"}
+    ]
+  },
+  {
+    "table_name": "products",
+    "table_description": "产品表，存储商城中所有产品的信息",
+    "columns": [
+      {"name": "id", "description": "产品唯一标识符，主键", "type": "INT"},
+      {"name": "name", "description": "产品名称", "type": "VARCHAR(200)"},
+      {"name": "category", "description": "产品分类", "type": "VARCHAR(100)"},
+      {"name": "price", "description": "产品单价", "type": "DECIMAL(10,2)"},
+      {"name": "stock", "description": "库存数量", "type": "INT"},
+      {"name": "description", "description": "产品详细描述", "type": "TEXT"}
+    ]
+  },
+  {
+    "table_name": "categories",
+    "table_description": "产品分类表，定义产品的分类信息",
+    "columns": [
+      {"name": "id", "description": "分类唯一标识符，主键", "type": "INT"},
+      {"name": "name", "description": "分类名称，必须唯一", "type": "VARCHAR(100)"},
+      {"name": "description", "description": "分类描述", "type": "TEXT"}
+    ]
+  },
+  {
+    "table_name": "order_items",
+    "table_description": "订单明细表，存储订单中包含的具体商品信息",
+    "columns": [
+      {"name": "id", "description": "订单明细唯一标识符，主键", "type": "INT"},
+      {"name": "order_id", "description": "关联的订单ID，外键", "type": "INT"},
+      {"name": "product_id", "description": "关联的产品ID，外键", "type": "INT"},
+      {"name": "quantity", "description": "该商品在订单中的数量", "type": "INT"},
+      {"name": "unit_price", "description": "该商品的单价（下单时的价格）", "type": "DECIMAL(10,2)"}
+    ]
+  }
+] 

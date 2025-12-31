@@ -1,0 +1,62 @@
+[
+  {
+    "question": "查询所有用户的姓名和邮箱",
+    "sql": "SELECT name, email FROM users",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查找年龄大于25岁的用户",
+    "sql": "SELECT * FROM users WHERE age > 25",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询每个用户的订单数量",
+    "sql": "SELECT u.name, COUNT(o.id) as order_count FROM users u LEFT JOIN orders o ON u.id = o.user_id GROUP BY u.id, u.name",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查找最近7天的订单",
+    "sql": "SELECT * FROM orders WHERE order_date >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询总销售额最高的前5个产品",
+    "sql": "SELECT p.name, SUM(oi.quantity * oi.unit_price) as total_sales FROM products p JOIN order_items oi ON p.id = oi.product_id GROUP BY p.id, p.name ORDER BY total_sales DESC LIMIT 5",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询某个用户的所有订单",
+    "sql": "SELECT o.*, u.name as user_name FROM orders o JOIN users u ON o.user_id = u.id WHERE u.name = '张三'",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询价格在100到500之间的产品",
+    "sql": "SELECT * FROM products WHERE price BETWEEN 100 AND 500",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询库存少于10的产品",
+    "sql": "SELECT * FROM products WHERE stock < 10",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询每个分类的产品数量",
+    "sql": "SELECT category, COUNT(*) as product_count FROM products GROUP BY category",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询订单总金额大于1000的订单",
+    "sql": "SELECT o.*, SUM(oi.quantity * oi.unit_price) as total_amount FROM orders o JOIN order_items oi ON o.id = oi.order_id GROUP BY o.id HAVING total_amount > 1000",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询没有下过订单的用户",
+    "sql": "SELECT u.* FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE o.id IS NULL",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询平均订单金额",
+    "sql": "SELECT AVG(total_amount) as avg_order_amount FROM (SELECT o.id, SUM(oi.quantity * oi.unit_price) as total_amount FROM orders o JOIN order_items oi ON o.id = oi.order_id GROUP BY o.id) as order_totals",
+    "database": "ecommerce"
+  }
+] 

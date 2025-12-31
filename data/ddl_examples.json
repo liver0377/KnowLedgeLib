@@ -1,0 +1,27 @@
+[
+  {
+    "table_name": "users",
+    "ddl_statement": "CREATE TABLE users (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(100) NOT NULL, email VARCHAR(150) UNIQUE, age INT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+    "description": "用户信息表，存储用户基本信息"
+  },
+  {
+    "table_name": "orders",
+    "ddl_statement": "CREATE TABLE orders (id INT PRIMARY KEY AUTO_INCREMENT, user_id INT, product_name VARCHAR(200), quantity INT, price DECIMAL(10,2), order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (user_id) REFERENCES users(id))",
+    "description": "订单表，存储用户订单信息"
+  },
+  {
+    "table_name": "products",
+    "ddl_statement": "CREATE TABLE products (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(200) NOT NULL, category VARCHAR(100), price DECIMAL(10,2), stock INT DEFAULT 0, description TEXT)",
+    "description": "产品表，存储产品基本信息"
+  },
+  {
+    "table_name": "categories",
+    "ddl_statement": "CREATE TABLE categories (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(100) NOT NULL UNIQUE, description TEXT)",
+    "description": "产品分类表"
+  },
+  {
+    "table_name": "order_items",
+    "ddl_statement": "CREATE TABLE order_items (id INT PRIMARY KEY AUTO_INCREMENT, order_id INT, product_id INT, quantity INT, unit_price DECIMAL(10,2), FOREIGN KEY (order_id) REFERENCES orders(id), FOREIGN KEY (product_id) REFERENCES products(id))",
+    "description": "订单明细表，存储订单中的具体商品信息"
+  }
+] 

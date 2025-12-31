@@ -1,4 +1,5 @@
 import os
+import json
 import hashlib
 from typing import Optional, Any
 
@@ -6,6 +7,7 @@ from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader
 from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+from langchain_core.documents import Document
 from langchain_milvus import Milvus as MilvusVectorStore
 from pymilvus import (
     Collection,
@@ -28,6 +30,99 @@ def sha1_file(path: str, buf_size: int = 1024 * 1024) -> str:
                 break
             h.update(b)
     return h.hexdigest()
+
+def _load_text2sql_json_documents(folder_path: str) -> list[Document]:
+    """
+    将 db_descriptions.json / ddl_examples.json / qsql_examples.json
+    转成 LangChain Document 列表，统一走 MilvusVectorStore.add_documents()
+    """
+    docs: list[Document] = []
+
+    # 1) db_descriptions.json
+    p = os.path.join(folder_path, "db_descriptions.json")
+    if os.path.exists(p):
+        with open(p, "r", encoding="utf-8") as f:
+            items = json.load(f)
+
+        for it in items:
+            table = it.get("table_name", "")
+            desc = it.get("table_description", "")
+            columns = it.get("columns", []) or []
+
+            lines = [
+                f"[SCHEMA] table: {table}",
+                f"desc: {desc}",
+                "columns:",
+            ]
+            for c in columns:
+                lines.append(f"- {c.get('name','')}: {c.get('description','')} ({c.get('type','')})")
+
+            docs.append(
+                Document(
+                    page_content="\n".join(lines),
+                    metadata={
+                        "doc_type": "description",
+                        "table_name": table,
+                        "database": it.get("database", ""),  
+                        "source": p,
+                        "raw": it,
+                    },
+                )
+            )
+
+    # 2) ddl_descriptions.json
+    p = os.path.join(folder_path, "ddl_descriptions.json")
+    if os.path.exists(p):
+        with open(p, "r", encoding="utf-8") as f:
+            items = json.load(f)
+
+        for it in items:
+            table = it.get("table_name", "")
+            ddl = it.get("ddl_statement", "")
+            d = it.get("description", "")
+
+            content = f"[DDL] table: {table}\n{ddl}\n# {d}"
+
+            docs.append(
+                Document(
+                    page_content=content,
+                    metadata={
+                        "doc_type": "ddl",
+                        "table_name": table,
+                        "database": it.get("database", ""),
+                        "source": p,
+                        "ddl_statement": ddl,
+                        "raw": it,
+                    },
+                )
+            )
+
+    # 3) qsql_examples.json
+    p = os.path.join(folder_path, "qsql_examples.json")
+    if os.path.exists(p):
+        with open(p, "r", encoding="utf-8") as f:
+            items = json.load(f)
+
+        for it in items:
+            question = it.get("question", "")
+            sql = it.get("sql", "")
+            db = it.get("database", "")
+
+            docs.append(
+                Document(
+                    page_content=f"[QSQL] question: {question}",
+                    metadata={
+                        "doc_type": "qsql",
+                        "database": db,
+                        "source": p,
+                        "question": question,
+                        "sql": sql,
+                        "raw": it,
+                    },
+                )
+            )
+
+    return docs
 
 
 def build_milvus_connection_args(uri: str) -> dict[str, Any]:
@@ -111,9 +206,9 @@ def ensure_collection(
     print(f"Collection `{collection_name}` ready. Index: {index_type}, metric: {metric}, params: {index_params}")
 
 
-def create_milvus_db(
+def create_milvus_doc_db(
     folder_path: str,
-    collection_name: str = "knowledge_base",
+    collection_name: str = "knowledge_base_doc",
     drop_if_exists: bool = False,
     chunk_size: int = 2000,
     overlap: int = 500,
@@ -129,17 +224,7 @@ def create_milvus_db(
     and ingest pdf/docx documents from a folder.
     """
     milvus_uri = os.getenv("MILVUS_URI", "http://localhost:19530")
-    connection_args: dict = {"uri": milvus_uri}
-    if token := os.getenv("MILVUS_TOKEN"):
-        connection_args["token"] = token
-    if user := os.getenv("MILVUS_USERNAME"):
-        connection_args["user"] = user
-    if password := os.getenv("MILVUS_PASSWORD"):
-        connection_args["password"] = password
-    if db_name := os.getenv("MILVUS_DB_NAME"):
-        connection_args["db_name"] = db_name
-    if os.getenv("MILVUS_TLS", "false").lower() == "true":
-        connection_args["secure"] = True
+    connection_args = build_milvus_connection_args(milvus_uri)
 
     resolved_device = device or os.getenv("EMBEDDING_DEVICE", "cpu")
     model_kwargs = {"device": resolved_device} if resolved_device else {}
@@ -219,20 +304,110 @@ def create_milvus_db(
     return vector_store
 
 
+def cerate_milvus_sql_db(
+    folder_path: str,
+    collection_name: str = "knowledge_base_sql",
+    drop_if_exists: bool = False,
+    embedding_model_name: str = "BAAI/bge-m3",
+    device: Optional[str] = None,
+    normalize_embeddings: bool = True,
+    nprobe: int = 32,
+    index_type: str = "IVF_FLAT",
+    index_params: dict[str, Any] = {"nlist": 1024} 
+): 
+    """ 构建 sql 知识库"""
+    milvus_uri = os.getenv("MILVUS_URI", "http://localhost:19530")
+    connection_args = build_milvus_connection_args(milvus_uri)
+
+    resolved_device = device or os.getenv("EMBEDDING_DEVICE", "cpu")
+    model_kwargs = {"device": resolved_device} if resolved_device else {}
+
+    embeddings = HuggingFaceBgeEmbeddings(
+        model_name=embedding_model_name,
+        model_kwargs=model_kwargs,
+        encode_kwargs={"normalize_embeddings": normalize_embeddings},
+    )
+
+    ensure_collection(
+        collection_name=collection_name,
+        dim=embeddings.client.get_sentence_embedding_dimension(),
+        drop_if_exists=drop_if_exists,
+        connection_args=connection_args,
+        index_type=index_type,
+        index_params=index_params,
+        text_max_length=16384,
+    )
+
+    vector_store = MilvusVectorStore(
+        embedding_function=embeddings,
+        collection_name=collection_name,
+        connection_args=connection_args,
+        primary_field="id",
+        vector_field="vector",
+        text_field="text",
+        metadata_field="metadata",
+        auto_id=False,
+        search_params={"params": {"nprobe": nprobe}, "metric_type": "COSINE"},
+    )
+
+    docs = _load_text2sql_json_documents(folder_path)
+    if not docs:
+        print("No Text2SQL json files found to ingest.")
+        return vector_store
+    
+    ids: list[str] = []
+    for d in docs:
+        raw = json.dumps(d.metadata.get("raw", {}), ensure_ascii=False, sort_keys=True)
+        hid = hashlib.sha1(raw.encode("utf-8")).hexdigest()
+        ids.append(f"{d.metadata.get('doc_type','kb')}:{d.metadata.get('database','')}:{d.metadata.get('table_name','')}:{hid}")
+
+    vector_store.add_documents(docs, ids=ids)
+    print(f"Milvus collection `{collection_name}` is ready with ingested Text2SQL json docs. count={len(docs)}")
+    return vector_store
+
+    
+
 if __name__ == "__main__":
     folder_path = "./data"
 
-    milvus_store = create_milvus_db(
+    # milvus_store = create_milvus_doc_db(
+    #     folder_path=folder_path,
+    #     collection_name=os.getenv("MILVUS_COLLECTION", "knowledge_base"),
+    #     drop_if_exists=True,
+    #     chunk_size=2000,
+    #     overlap=500,
+    # )
+
+    # retriever = milvus_store.as_retriever(search_kwargs={"k": 3})
+    # query = "What's my company's mission and values"
+    # results = retriever.invoke(query)
+
+    # for i, doc in enumerate(results, start=1):
+    #     print(f"\n🔹 Result {i}:\n{doc.page_content}\nTags: {doc.metadata}")
+
+    sql_store = cerate_milvus_sql_db(
         folder_path=folder_path,
-        collection_name=os.getenv("MILVUS_COLLECTION", "knowledge_base"),
+        collection_name=os.getenv("MILVUS_SQL_COLLECTION", "knowledge_base_sql"),
         drop_if_exists=True,
-        chunk_size=2000,
-        overlap=500,
     )
 
-    retriever = milvus_store.as_retriever(search_kwargs={"k": 3})
-    query = "What's my company's mission and values"
-    results = retriever.invoke(query)
+    # 只查 schema/ddl
+    sql_retriever = sql_store.as_retriever(search_kwargs={
+        "k": 5,
+        "expr": 'metadata["doc_type"] in ["ddl","description"]'
+    })
+    hits = sql_retriever.invoke("users表有哪些字段？email是否唯一？")
+    for i, doc in enumerate(hits, 1):
+        print(f"\n[SQL KB] Hit {i} type={doc.metadata.get('doc_type')} table={doc.metadata.get('table_name')}")
+        print(doc.page_content)
 
-    for i, doc in enumerate(results, start=1):
-        print(f"\n🔹 Result {i}:\n{doc.page_content}\nTags: {doc.metadata}")
+    # 查 few-shot
+    example_retriever = sql_store.as_retriever(search_kwargs={
+       "k": 3,
+       "expr": 'metadata["doc_type"] == "qsql" and metadata["database"] == "ecommerce"'
+    })
+    example_hits = example_retriever.invoke("查询每个用户的订单数量")
+    for i, doc in enumerate(example_hits, 1):
+        print(f"\n[QSQL] Hit {i} score? (see retriever) db={doc.metadata.get('database')}")
+        print("Q:", doc.metadata.get("question"))
+        print("SQL:", doc.metadata.get("sql"))
