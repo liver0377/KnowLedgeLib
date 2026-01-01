@@ -39,7 +39,7 @@ dependencies = [
     "langgraph-checkpoint-postgres ~=2.0.13",
     "langgraph-checkpoint-sqlite ~=2.0.1",
     "langgraph-supervisor ~=0.0.31",
-    "langsmith ~=0.4.0",
+    "langsmith~=0.4.0",
     "numexpr ~=2.10.1",
     "numpy ~=2.3.4",
     "onnxruntime ~= 1.21.1",
@@ -60,6 +60,9 @@ dependencies = [
     "sentence-transformers>=5.2.0",
     "langchain-milvus>=0.3.2",
     "langchain-huggingface>=1.0.1",
+    "sqlglot>=28.5.0",
+    "sqlalchemy>=2.0.44",
+    "pymysql>=1.1.2",
 ]
 
 [dependency-groups]

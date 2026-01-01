@@ -372,7 +372,7 @@ if __name__ == "__main__":
 
     # milvus_store = create_milvus_doc_db(
     #     folder_path=folder_path,
-    #     collection_name=os.getenv("MILVUS_COLLECTION", "knowledge_base"),
+    #     collection_name=os.getenv("MILVUS_COLLECTION", "knowledge_base_doc"),
     #     drop_if_exists=True,
     #     chunk_size=2000,
     #     overlap=500,

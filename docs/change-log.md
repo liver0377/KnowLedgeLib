@@ -1,3 +1,7 @@
 - 12.30
   - 将OpenAIEmbedding替换成了BGEEmbedding
   - 完成了milvus vector store的配置，将文档添加到milvus的数据库中
+- 12.31
+  - 将SQL文档添加到了milvus文档中
+- 12.32
+  - 添加了完整的Text2SQL功能以及SQL执行功能
