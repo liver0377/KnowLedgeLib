@@ -75,6 +75,10 @@ class StreamInput(UserInput):
         default=True,
     )
 
+class LoginInput(BaseModel):
+    """ 用户登录时的iput"""
+    username: str
+    password: str
 
 class ToolCall(TypedDict):
     """Represents a request to call a tool."""

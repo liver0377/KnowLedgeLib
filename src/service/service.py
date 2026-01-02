@@ -2,12 +2,16 @@ import inspect
 import json
 import logging
 import warnings
+import time
+import jwt
+from jwt import PyJWKError
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 from uuid import UUID, uuid4
+from passlib.context import CryptContext
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, status, Request, Response
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -33,15 +37,22 @@ from schema import (
     ServiceMetadata,
     StreamInput,
     UserInput,
+    LoginInput
 )
 from service.utils import (
     convert_message_content_to_string,
     langchain_to_chat_message,
     remove_tool_calls,
 )
+from service.auth import (
+    create_access_token,
+    get_current_user
+)
 
 warnings.filterwarnings("ignore", category=LangChainBetaWarning)
 logger = logging.getLogger(__name__)
+
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 def custom_generate_unique_id(route: APIRoute) -> str:
@@ -100,10 +111,67 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(lifespan=lifespan, generate_unique_id_function=custom_generate_unique_id)
-router = APIRouter(dependencies=[Depends(verify_bearer)])
+# 给所有接口添加verify_token依赖，每个接口会先跑verify_bearer
+# router = APIRouter(dependencies=[Depends(verify_bearer)])
+
+# 公开接口: /health, /info
+public_router = APIRouter()       
+# 需要登录的接口: /invoke, /stream, /history, /feedback
+protected_router = APIRouter(dependencies=[Depends(get_current_user)])     
+# 保留AUTH_SECRET给后台任务使用
+internal_router = APIRouter(prefix="/internal", dependencies=[Depends(verify_bearer)])
+# 专门用于鉴权的接口: /login, /logout, /me
+auth_router = APIRouter(prefix="/auth", tags=["auth"])
+
+# TODO: 接上真实用户数据库
+_demo_users = {
+    "ryan": {
+        "password_hash": pwd_context.hash("123456"),  # demo
+        "roles": ["admin"],
+        "user_id": "user-ryan",
+    },
+    "viewer": {
+        "password_hash": pwd_context.hash("123456"),
+        "roles": ["viewer"],
+        "user_id": "user-viewer",
+    },
+}
 
 
-@router.get("/info")
+@auth_router.post("/login")
+async def login(data: LoginInput, response: Response):
+    u = _demo_users.get(data.username)
+
+    # 找不到用户或者密码不对
+    if not u or not pwd_context.verify(data.password, u["password_hash"]):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bad credentials")
+
+    token = create_access_token(sub=u["user_id"], roles=u["roles"])
+
+    # 本地开发：secure=False；上线 HTTPS：secure=True
+    # 设置cookie
+    response.set_cookie(
+        key=settings.JWT_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=settings.JWT_EXPIRES_SECONDS,
+        path="/",
+    )
+    return {"ok": True}
+
+@auth_router.post("/logout")
+async def logout(response: Response, user: dict[str, Any] = Depends(get_current_user),):
+    response.delete_cookie(settings.JWT_COOKIE_NAME, path="/")
+    return {"ok": True}
+
+@auth_router.get("/me")
+async def me(user: dict[str, Any] = Depends(get_current_user)):
+    """返回已登录用户的用户身份"""
+    return user
+
+@public_router.get("/info")
 async def info() -> ServiceMetadata:
     models = list(settings.AVAILABLE_MODELS)
     models.sort()
@@ -172,8 +240,8 @@ async def _handle_input(user_input: UserInput, agent: AgentGraph) -> tuple[dict[
     return kwargs, run_id
 
 
-@router.post("/{agent_id}/invoke", operation_id="invoke_with_agent_id")
-@router.post("/invoke")
+@protected_router.post("/{agent_id}/invoke", operation_id="invoke_with_agent_id")
+@protected_router.post("/invoke")
 async def invoke(user_input: UserInput, agent_id: str = DEFAULT_AGENT) -> ChatMessage:
     """
     Invoke an agent with user input to retrieve a final response.
@@ -347,13 +415,13 @@ def _sse_response_example() -> dict[int | str, Any]:
     }
 
 
-@router.post(
+@protected_router.post(
     "/{agent_id}/stream",
     response_class=StreamingResponse,
     responses=_sse_response_example(),
     operation_id="stream_with_agent_id",
 )
-@router.post("/stream", response_class=StreamingResponse, responses=_sse_response_example())
+@protected_router.post("/stream", response_class=StreamingResponse, responses=_sse_response_example())
 async def stream(user_input: StreamInput, agent_id: str = DEFAULT_AGENT) -> StreamingResponse:
     """
     Stream an agent's response to a user input, including intermediate messages and tokens.
@@ -371,7 +439,7 @@ async def stream(user_input: StreamInput, agent_id: str = DEFAULT_AGENT) -> Stre
     )
 
 
-@router.post("/feedback")
+@protected_router.post("/feedback")
 async def feedback(feedback: Feedback) -> FeedbackResponse:
     """
     Record feedback for a run to LangSmith.
@@ -391,7 +459,7 @@ async def feedback(feedback: Feedback) -> FeedbackResponse:
     return FeedbackResponse()
 
 
-@router.post("/history")
+@protected_router.post("/history")
 async def history(input: ChatHistoryInput) -> ChatHistory:
     """
     Get chat history.
@@ -410,7 +478,7 @@ async def history(input: ChatHistoryInput) -> ChatHistory:
         raise HTTPException(status_code=500, detail="Unexpected error")
 
 
-@app.get("/health")
+@public_router.get("/health")
 async def health_check():
     """Health check endpoint."""
 
@@ -427,4 +495,7 @@ async def health_check():
     return health_status
 
 
-app.include_router(router)
+app.include_router(public_router)
+app.include_router(protected_router)
+app.include_router(auth_router)
+app.include_router(internal_router)

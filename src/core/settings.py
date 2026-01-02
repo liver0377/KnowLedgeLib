@@ -152,6 +152,12 @@ class Settings(BaseSettings):
         default_factory=dict, description="Map of model names to Azure deployment IDs"
     )
 
+    # Auth Configuration
+    JWT_ALG: str | None = "HS256"                         # JWT signature 加密算法
+    JWT_COOKIE_NAME: str | None = "access_token"          # JWT cookie 字段名
+    JWT_EXPIRES_SECONDS: int | None = 60 * 60 # 1h
+    JWT_SECRET: SecretStr | None = "dev-only-change-me"   # JWT加密秘钥
+
     def model_post_init(self, __context: Any) -> None:
         api_keys = {
             Provider.OPENAI: self.OPENAI_API_KEY,
