@@ -1,7 +1,8 @@
 import json
 import os
+import logging
 from collections.abc import AsyncGenerator, Generator
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 
@@ -13,8 +14,11 @@ from schema import (
     ServiceMetadata,
     StreamInput,
     UserInput,
+    LoginInput,
 )
 
+
+logger = logging.getLogger(__name__)
 
 class AgentClientError(Exception):
     pass
@@ -40,11 +44,27 @@ class AgentClient:
             get_info (bool, optional): Whether to fetch agent information on init.
                 Default: True
         """
-        self.base_url = base_url
+        self.base_url = base_url.rstrip("/")
         self.auth_secret = os.getenv("AUTH_SECRET")
         self.timeout = timeout
         self.info: ServiceMetadata | None = None
         self.agent: str | None = None
+
+        # IMPORTANT:
+        # Keep persistent clients so cookies (JWT) persist across requests.
+        self._client = httpx.Client(
+            base_url=self.base_url,
+            headers=self._headers,
+            timeout=self.timeout,
+            follow_redirects=True,
+        )
+        self._aclient = httpx.AsyncClient(
+            base_url=self.base_url,
+            headers=self._headers,
+            timeout=self.timeout,
+            follow_redirects=True,
+        )
+
         if get_info:
             self.retrieve_info()
         if agent:
@@ -52,27 +72,49 @@ class AgentClient:
 
     @property
     def _headers(self) -> dict[str, str]:
-        headers = {}
+        """ 请求头"""
+        headers: dict[str, str] = {}
         if self.auth_secret:
             headers["Authorization"] = f"Bearer {self.auth_secret}"
         return headers
 
-    def retrieve_info(self) -> None:
-        try:
-            response = httpx.get(
-                f"{self.base_url}/info",
-                headers=self._headers,
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as e:
-            raise AgentClientError(f"Error getting service info: {e}")
+    def close(self) -> None:
+        """Close the sync client."""
+        self._client.close()
 
+    async def aclose(self) -> None:
+        """Close the async client."""
+        await self._aclient.aclose()
+
+    def _raise(self, response: httpx.Response, prefix: str = "Error") -> None:
+        """ response 错误处理 """
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            # try to surface backend error detail
+            try:
+                detail = response.json()
+            except Exception:
+                detail = response.text
+            raise AgentClientError(f"{prefix}: {e.response.status_code} {detail}")
+        except httpx.HTTPError as e:
+            raise AgentClientError(f"{prefix}: {e}")
+
+    # -------------------------
+    # Public /info
+    # -------------------------
+    def retrieve_info(self) -> None:
+        """ 初始化时检索 ServiceMetaData """
+        response = self._client.get("/info")
+        self._raise(response, "Error getting service info")
+
+        # 反序列化
         self.info = ServiceMetadata.model_validate(response.json())
         if not self.agent or self.agent not in [a.key for a in self.info.agents]:
             self.agent = self.info.default_agent
 
     def update_agent(self, agent: str, verify: bool = True) -> None:
+        """ 检查agent是否在/info返回的agents列表中 """
         if verify:
             if not self.info:
                 self.retrieve_info()
@@ -83,6 +125,48 @@ class AgentClient:
                 )
         self.agent = agent
 
+    # -------------------------
+    # Auth APIs (NEW)
+    # -------------------------
+    def login(self, username: str, password: str) -> dict[str, Any]:
+        """
+        POST /auth/login
+        Server sets HttpOnly JWT cookie; httpx stores it in this client's cookie jar.
+        """
+        req = LoginInput(username=username, password=password)
+        resp = self._client.post("/auth/login", json=req.model_dump())
+        self._raise(resp, "Login failed")
+        return resp.json()
+
+    async def alogin(self, username: str, password: str) -> dict[str, Any]:
+        req = LoginInput(username=username, password=password)
+        resp = await self._aclient.post("/auth/login", json=req.model_dump())
+        self._raise(resp, "Login failed")
+        return resp.json()
+
+    def logout(self) -> dict[str, Any]:
+        resp = self._client.post("/auth/logout")
+        self._raise(resp, "Logout failed")
+        return resp.json()
+
+    async def alogout(self) -> dict[str, Any]:
+        resp = await self._aclient.post("/auth/logout")
+        self._raise(resp, "Logout failed")
+        return resp.json()
+
+    def me(self) -> dict[str, Any]:
+        resp = self._client.get("/auth/me")
+        self._raise(resp, "Me failed")
+        return resp.json()
+
+    async def ame(self) -> dict[str, Any]:
+        resp = await self._aclient.get("/auth/me")
+        self._raise(resp, "Me failed")
+        return resp.json()
+
+    # -------------------------
+    # Invoke
+    # -------------------------
     async def ainvoke(
         self,
         message: str,
@@ -91,21 +175,12 @@ class AgentClient:
         user_id: str | None = None,
         agent_config: dict[str, Any] | None = None,
     ) -> ChatMessage:
-        """
-        Invoke the agent asynchronously. Only the final message is returned.
 
-        Args:
-            message (str): The message to send to the agent
-            model (str, optional): LLM model to use for the agent
-            thread_id (str, optional): Thread ID for continuing a conversation
-            user_id (str, optional): User ID for continuing a conversation across multiple threads
-            agent_config (dict[str, Any], optional): Additional configuration to pass through to the agent
+        # logger.info(f"ainvoke()...")
 
-        Returns:
-            AnyMessage: The response from the agent
-        """
         if not self.agent:
             raise AgentClientError("No agent selected. Use update_agent() to select an agent.")
+
         request = UserInput(message=message)
         if thread_id:
             request.thread_id = thread_id
@@ -115,18 +190,10 @@ class AgentClient:
             request.agent_config = agent_config
         if user_id:
             request.user_id = user_id
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(
-                    f"{self.base_url}/{self.agent}/invoke",
-                    json=request.model_dump(),
-                    headers=self._headers,
-                    timeout=self.timeout,
-                )
-                response.raise_for_status()
-            except httpx.HTTPError as e:
-                raise AgentClientError(f"Error: {e}")
 
+        response = await self._aclient.post(f"/{self.agent}/invoke", json=request.model_dump())
+        self._raise(response, "Invoke failed")
+        # 反序列化为ChatmMessage对象
         return ChatMessage.model_validate(response.json())
 
     def invoke(
@@ -137,21 +204,12 @@ class AgentClient:
         user_id: str | None = None,
         agent_config: dict[str, Any] | None = None,
     ) -> ChatMessage:
-        """
-        Invoke the agent synchronously. Only the final message is returned.
 
-        Args:
-            message (str): The message to send to the agent
-            model (str, optional): LLM model to use for the agent
-            thread_id (str, optional): Thread ID for continuing a conversation
-            user_id (str, optional): User ID for continuing a conversation across multiple threads
-            agent_config (dict[str, Any], optional): Additional configuration to pass through to the agent
+        # logger.info(f"invoke()...")
 
-        Returns:
-            ChatMessage: The response from the agent
-        """
         if not self.agent:
             raise AgentClientError("No agent selected. Use update_agent() to select an agent.")
+
         request = UserInput(message=message)
         if thread_id:
             request.thread_id = thread_id
@@ -161,21 +219,20 @@ class AgentClient:
             request.agent_config = agent_config
         if user_id:
             request.user_id = user_id
-        try:
-            response = httpx.post(
-                f"{self.base_url}/{self.agent}/invoke",
-                json=request.model_dump(),
-                headers=self._headers,
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as e:
-            raise AgentClientError(f"Error: {e}")
 
+        response = self._client.post(f"/{self.agent}/invoke", json=request.model_dump())
+        self._raise(response, "Invoke failed")
         return ChatMessage.model_validate(response.json())
 
+    # -------------------------
+    # Stream
+    # -------------------------
     def _parse_stream_line(self, line: str) -> ChatMessage | str | None:
+        """ 把服务端 流式接口 (SSE风格)返回的一行文本解析为ChatMessage/str/None"""
         line = line.strip()
+
+        # logger.info(f"line: {line}")
+
         if line.startswith("data: "):
             data = line[6:]
             if data == "[DONE]":
@@ -184,15 +241,14 @@ class AgentClient:
                 parsed = json.loads(data)
             except Exception as e:
                 raise Exception(f"Error JSON parsing message from server: {e}")
+
             match parsed["type"]:
                 case "message":
-                    # Convert the JSON formatted message to an AnyMessage
                     try:
                         return ChatMessage.model_validate(parsed["content"])
                     except Exception as e:
                         raise Exception(f"Server returned invalid message: {e}")
                 case "token":
-                    # Yield the str token directly
                     return parsed["content"]
                 case "error":
                     error_msg = "Error: " + parsed["content"]
@@ -208,27 +264,10 @@ class AgentClient:
         agent_config: dict[str, Any] | None = None,
         stream_tokens: bool = True,
     ) -> Generator[ChatMessage | str, None, None]:
-        """
-        Stream the agent's response synchronously.
-
-        Each intermediate message of the agent process is yielded as a ChatMessage.
-        If stream_tokens is True (the default value), the response will also yield
-        content tokens from streaming models as they are generated.
-
-        Args:
-            message (str): The message to send to the agent
-            model (str, optional): LLM model to use for the agent
-            thread_id (str, optional): Thread ID for continuing a conversation
-            user_id (str, optional): User ID for continuing a conversation across multiple threads
-            agent_config (dict[str, Any], optional): Additional configuration to pass through to the agent
-            stream_tokens (bool, optional): Stream tokens as they are generated
-                Default: True
-
-        Returns:
-            Generator[ChatMessage | str, None, None]: The response from the agent
-        """
+        # logger.info(f"stream()...")
         if not self.agent:
             raise AgentClientError("No agent selected. Use update_agent() to select an agent.")
+
         request = StreamInput(message=message, stream_tokens=stream_tokens)
         if thread_id:
             request.thread_id = thread_id
@@ -238,23 +277,26 @@ class AgentClient:
             request.model = model  # type: ignore[assignment]
         if agent_config:
             request.agent_config = agent_config
-        try:
-            with httpx.stream(
-                "POST",
-                f"{self.base_url}/{self.agent}/stream",
-                json=request.model_dump(),
-                headers=self._headers,
-                timeout=self.timeout,
-            ) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if line.strip():
-                        parsed = self._parse_stream_line(line)
-                        if parsed is None:
-                            break
-                        yield parsed
-        except httpx.HTTPError as e:
-            raise AgentClientError(f"Error: {e}")
+
+        with self._client.stream(
+            "POST",
+            f"/{self.agent}/stream",
+            json=request.model_dump(),
+        ) as response:
+            self._raise(response, "Stream failed")
+
+            
+            # 将响应体当成文本流，按行迭代
+            for line in response.iter_lines():
+                # 每一行的文本
+                # data: {"type":"token","content":"xxx"}
+                # ...
+                # data: [Done]
+                if line.strip():
+                    parsed = self._parse_stream_line(line)
+                    if parsed is None:
+                        break
+                    yield parsed
 
     async def astream(
         self,
@@ -265,27 +307,10 @@ class AgentClient:
         agent_config: dict[str, Any] | None = None,
         stream_tokens: bool = True,
     ) -> AsyncGenerator[ChatMessage | str, None]:
-        """
-        Stream the agent's response asynchronously.
-
-        Each intermediate message of the agent process is yielded as an AnyMessage.
-        If stream_tokens is True (the default value), the response will also yield
-        content tokens from streaming modelsas they are generated.
-
-        Args:
-            message (str): The message to send to the agent
-            model (str, optional): LLM model to use for the agent
-            thread_id (str, optional): Thread ID for continuing a conversation
-            user_id (str, optional): User ID for continuing a conversation across multiple threads
-            agent_config (dict[str, Any], optional): Additional configuration to pass through to the agent
-            stream_tokens (bool, optional): Stream tokens as they are generated
-                Default: True
-
-        Returns:
-            AsyncGenerator[ChatMessage | str, None]: The response from the agent
-        """
+        logger.info("astream()...")
         if not self.agent:
             raise AgentClientError("No agent selected. Use update_agent() to select an agent.")
+
         request = StreamInput(message=message, stream_tokens=stream_tokens)
         if thread_id:
             request.thread_id = thread_id
@@ -295,68 +320,38 @@ class AgentClient:
             request.agent_config = agent_config
         if user_id:
             request.user_id = user_id
-        async with httpx.AsyncClient() as client:
-            try:
-                async with client.stream(
-                    "POST",
-                    f"{self.base_url}/{self.agent}/stream",
-                    json=request.model_dump(),
-                    headers=self._headers,
-                    timeout=self.timeout,
-                ) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if line.strip():
-                            parsed = self._parse_stream_line(line)
-                            if parsed is None:
-                                break
-                            # Don't yield empty string tokens as they cause generator issues
-                            if parsed != "":
-                                yield parsed
-            except httpx.HTTPError as e:
-                raise AgentClientError(f"Error: {e}")
 
+        async with self._aclient.stream(
+            "POST",
+            f"/{self.agent}/stream",
+            json=request.model_dump(),
+        ) as response:
+            self._raise(response, "Stream failed")
+
+            async for line in response.aiter_lines():
+                if line.strip():
+                    parsed = self._parse_stream_line(line)
+                    if parsed is None:
+                        break
+                    if parsed != "":
+                        yield parsed
+
+    # -------------------------
+    # Feedback
+    # -------------------------
     async def acreate_feedback(
-        self, run_id: str, key: str, score: float, kwargs: dict[str, Any] = {}
+        self, run_id: str, key: str, score: float, kwargs: Optional[dict[str, Any]] = None
     ) -> None:
-        """
-        Create a feedback record for a run.
+        request = Feedback(run_id=run_id, key=key, score=score, kwargs=kwargs or {})
+        response = await self._aclient.post("/feedback", json=request.model_dump())
+        self._raise(response, "Create feedback failed")
+        response.json()
 
-        This is a simple wrapper for the LangSmith create_feedback API, so the
-        credentials can be stored and managed in the service rather than the client.
-        See: https://api.smith.langchain.com/redoc#tag/feedback/operation/create_feedback_api_v1_feedback_post
-        """
-        request = Feedback(run_id=run_id, key=key, score=score, kwargs=kwargs)
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(
-                    f"{self.base_url}/feedback",
-                    json=request.model_dump(),
-                    headers=self._headers,
-                    timeout=self.timeout,
-                )
-                response.raise_for_status()
-                response.json()
-            except httpx.HTTPError as e:
-                raise AgentClientError(f"Error: {e}")
-
+    # -------------------------
+    # History
+    # -------------------------
     def get_history(self, thread_id: str) -> ChatHistory:
-        """
-        Get chat history.
-
-        Args:
-            thread_id (str, optional): Thread ID for identifying a conversation
-        """
         request = ChatHistoryInput(thread_id=thread_id)
-        try:
-            response = httpx.post(
-                f"{self.base_url}/history",
-                json=request.model_dump(),
-                headers=self._headers,
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as e:
-            raise AgentClientError(f"Error: {e}")
-
+        response = self._client.post("/history", json=request.model_dump())
+        self._raise(response, "Get history failed")
         return ChatHistory.model_validate(response.json())
