@@ -8,6 +8,11 @@ from typing import Any
 
 # pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+_DEMO_ALLOWED_DEPT_KEYS: dict[str, list[str]] = {
+    "user-ryan": ["micro_service"],      # admin 看全部
+    "user-viewer": ["AI"],   # 只能看 AI 部门
+}
+
 def jwt_secret() -> str:
     return settings.JWT_SECRET.get_secret_value()  # type: ignore[attr-defined]
 
@@ -52,3 +57,20 @@ def require_roles(*allowed: str):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
         return user
     return _dep
+
+
+
+def get_user_context(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    """
+    工业界常见：JWT 只负责 AuthN（你是谁），这里负责 AuthZ 上下文（你能看什么）。
+    未来改成查数据库/权限服务即可。
+    """
+    user_id = user["user_id"]
+    roles = user.get("roles", [])
+    allowed_dept_keys = _DEMO_ALLOWED_DEPT_KEYS.get(user_id, [])  # 查 DB/权限服务
+
+    return {
+        "user_id": user_id,
+        "roles": roles,
+        "allowed_dept_keys": allowed_dept_keys,
+    }

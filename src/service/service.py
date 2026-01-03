@@ -46,7 +46,8 @@ from service.utils import (
 )
 from service.auth import (
     create_access_token,
-    get_current_user
+    get_current_user,
+    get_user_context
 )
 
 warnings.filterwarnings("ignore", category=LangChainBetaWarning)
@@ -117,7 +118,8 @@ app = FastAPI(lifespan=lifespan, generate_unique_id_function=custom_generate_uni
 # 公开接口: /health, /info
 public_router = APIRouter()       
 # 需要登录的接口: /invoke, /stream, /history, /feedback
-protected_router = APIRouter(dependencies=[Depends(get_current_user)])     
+# protected_router = APIRouter(dependencies=[Depends(get_current_user)])     
+protected_router = APIRouter(dependencies=[Depends(get_user_context)])
 # 保留AUTH_SECRET给后台任务使用
 internal_router = APIRouter(prefix="/internal", dependencies=[Depends(verify_bearer)])
 # 专门用于鉴权的接口: /login, /logout, /me
@@ -129,11 +131,13 @@ _demo_users = {
         "password_hash": pwd_context.hash("123456"),  # demo
         "roles": ["admin"],
         "user_id": "user-ryan",
+        "dept_key": "micro_service"
     },
     "viewer": {
         "password_hash": pwd_context.hash("123456"),
         "roles": ["viewer"],
         "user_id": "user-viewer",
+        "dept_key": "AI"
     },
 }
 
@@ -162,12 +166,12 @@ async def login(data: LoginInput, response: Response):
     return {"ok": True}
 
 @auth_router.post("/logout")
-async def logout(response: Response, user: dict[str, Any] = Depends(get_current_user),):
+async def logout(response: Response, user: dict[str, Any] = Depends(get_user_context),):
     response.delete_cookie(settings.JWT_COOKIE_NAME, path="/")
     return {"ok": True}
 
 @auth_router.get("/me")
-async def me(user: dict[str, Any] = Depends(get_current_user)):
+async def me(user: dict[str, Any] = Depends(get_user_context)):
     """返回已登录用户的用户身份"""
     return user
 
@@ -183,16 +187,25 @@ async def info() -> ServiceMetadata:
     )
 
 
-async def _handle_input(user_input: UserInput, agent: AgentGraph) -> tuple[dict[str, Any], UUID]:
+async def _handle_input(user_input: UserInput, agent: AgentGraph, user: dict[str, Any]) -> tuple[dict[str, Any], UUID]:
     """
     Parse user input and handle any required interrupt resumption.
     Returns kwargs for agent invocation and the run_id.
     """
     run_id = uuid4()
     thread_id = user_input.thread_id or str(uuid4())
-    user_id = user_input.user_id or str(uuid4())
 
-    configurable = {"thread_id": thread_id, "user_id": user_id}
+    user_id = user.get("user_id")
+    roles = user.get("roles", [])
+    allowed_dept_keys = user.get("allowed_dept_keys", [])
+
+    configurable = {
+        "thread_id": thread_id,
+        "user_id": user_id,
+        "roles": roles,
+        "allowed_dept_keys": allowed_dept_keys,
+    }
+
     if user_input.model is not None:
         configurable["model"] = user_input.model
 
@@ -242,7 +255,7 @@ async def _handle_input(user_input: UserInput, agent: AgentGraph) -> tuple[dict[
 
 @protected_router.post("/{agent_id}/invoke", operation_id="invoke_with_agent_id")
 @protected_router.post("/invoke")
-async def invoke(user_input: UserInput, agent_id: str = DEFAULT_AGENT) -> ChatMessage:
+async def invoke(user_input: UserInput, agent_id: str = DEFAULT_AGENT, user: dict[str, Any] = Depends(get_user_context)) -> ChatMessage:
     """
     Invoke an agent with user input to retrieve a final response.
 
@@ -257,7 +270,7 @@ async def invoke(user_input: UserInput, agent_id: str = DEFAULT_AGENT) -> ChatMe
     # you'd want to include it. You could update the API to return a list of ChatMessages
     # in that case.
     agent: AgentGraph = get_agent(agent_id)
-    kwargs, run_id = await _handle_input(user_input, agent)
+    kwargs, run_id = await _handle_input(user_input, agent, user)
 
     try:
         response_events: list[tuple[str, Any]] = await agent.ainvoke(**kwargs, stream_mode=["updates", "values"])  # type: ignore # fmt: skip
@@ -282,7 +295,7 @@ async def invoke(user_input: UserInput, agent_id: str = DEFAULT_AGENT) -> ChatMe
 
 
 async def message_generator(
-    user_input: StreamInput, agent_id: str = DEFAULT_AGENT
+    user_input: StreamInput, agent_id: str = DEFAULT_AGENT, user: dict[str, Any] = None
 ) -> AsyncGenerator[str, None]:
     """
     Generate a stream of messages from the agent.
@@ -290,7 +303,7 @@ async def message_generator(
     This is the workhorse method for the /stream endpoint.
     """
     agent: AgentGraph = get_agent(agent_id)
-    kwargs, run_id = await _handle_input(user_input, agent)
+    kwargs, run_id = await _handle_input(user_input, agent, user)
 
     try:
         # Process streamed events from the graph and yield messages over the SSE stream.
@@ -422,7 +435,7 @@ def _sse_response_example() -> dict[int | str, Any]:
     operation_id="stream_with_agent_id",
 )
 @protected_router.post("/stream", response_class=StreamingResponse, responses=_sse_response_example())
-async def stream(user_input: StreamInput, agent_id: str = DEFAULT_AGENT) -> StreamingResponse:
+async def stream(user_input: StreamInput, agent_id: str = DEFAULT_AGENT, user: dict[str, Any] = Depends(get_user_context)) -> StreamingResponse:
     """
     Stream an agent's response to a user input, including intermediate messages and tokens.
 
@@ -434,7 +447,7 @@ async def stream(user_input: StreamInput, agent_id: str = DEFAULT_AGENT) -> Stre
     Set `stream_tokens=false` to return intermediate messages but not token-by-token.
     """
     return StreamingResponse(
-        message_generator(user_input, agent_id),
+        message_generator(user_input, agent_id, user),
         media_type="text/event-stream",
     )
 
@@ -461,21 +474,22 @@ async def feedback(feedback: Feedback) -> FeedbackResponse:
 
 @protected_router.post("/history")
 async def history(input: ChatHistoryInput) -> ChatHistory:
-    """
-    Get chat history.
-    """
-    # TODO: Hard-coding DEFAULT_AGENT here is wonky
     agent: AgentGraph = get_agent(DEFAULT_AGENT)
     try:
         state_snapshot = await agent.aget_state(
             config=RunnableConfig(configurable={"thread_id": input.thread_id})
         )
-        messages: list[AnyMessage] = state_snapshot.values["messages"]
+
+        values = getattr(state_snapshot, "values", None) or {}
+        messages: list[AnyMessage] = values.get("messages", []) or []
+
         chat_messages: list[ChatMessage] = [langchain_to_chat_message(m) for m in messages]
         return ChatHistory(messages=chat_messages)
+
     except Exception as e:
         logger.error(f"An exception occurred: {e}")
         raise HTTPException(status_code=500, detail="Unexpected error")
+
 
 
 @public_router.get("/health")

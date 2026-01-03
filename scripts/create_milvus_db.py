@@ -262,43 +262,55 @@ def create_milvus_doc_db(
 
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=overlap)
 
-    for filename in os.listdir(folder_path):
-        file_path = os.path.join(folder_path, filename)
+    for dept_entry in os.scandir(folder_path):
+        if not dept_entry.is_dir():
+            continue  # 只处理子目录（每个子目录代表一个 dept）
 
-        if filename.lower().endswith(".pdf"):
-            loader = PyPDFLoader(file_path)
-        elif filename.lower().endswith(".docx"):
-            loader = Docx2txtLoader(file_path)
-        else:
-            continue  # Skip unsupported file types
+        dept_key = dept_entry.name          # 子目录名作为 dept_key
+        dept_folder = dept_entry.path       # 该 dept 的目录路径
 
-        documents = loader.load()
-        chunks = text_splitter.split_documents(documents)
+        for file_entry in os.scandir(dept_folder):
+            if not file_entry.is_file():
+                continue
 
-        ids = []
+            filename = file_entry.name
+            file_path = file_entry.path
 
-        # doc_id 用文件内容 hash，避免同名冲突，也能区分版本
-        doc_id = sha1_file(file_path)
+            if filename.lower().endswith(".pdf"):
+                loader = PyPDFLoader(file_path)
+            elif filename.lower().endswith(".docx"):
+                loader = Docx2txtLoader(file_path)
+            else:
+                continue  # Skip unsupported file types
 
-        for idx, chunk in enumerate(chunks):
-            page = chunk.metadata.get("page", "nil")
+            documents = loader.load()
+            chunks = text_splitter.split_documents(documents)
 
-            # 每个 chunk 的唯一 id
-            chunk_id = f"{doc_id}:{page}:{idx}"
-            ids.append(chunk_id)
+            ids = []
 
-            # metadata 统一写入（用于过滤/追溯/引用）
-            chunk.metadata.update({
-                "source": file_path,
-                "filename": filename,
-                "doc_id": doc_id,
-                "page": page,
-                "chunk_index": idx,
-            })
+            # doc_id 用文件内容 hash，避免同名冲突，也能区分版本
+            doc_id = sha1_file(file_path)
 
-        # vector, text, metadata均会在add_documents自动赋值
-        vector_store.add_documents(chunks, ids=ids)
-        print(f"Document {filename} added with {len(chunks)} chunks.")
+            for idx, chunk in enumerate(chunks):
+                page = chunk.metadata.get("page", "nil")
+
+                # 每个 chunk 的唯一 id
+                chunk_id = f"{doc_id}:{page}:{idx}"
+                ids.append(chunk_id)
+
+                # metadata 统一写入（用于过滤/追溯/引用）
+                chunk.metadata.update({
+                    "source": file_path,
+                    "filename": filename,
+                    "doc_id": doc_id,
+                    "page": page,
+                    "chunk_index": idx,
+                    "chunk_id": chunk_id,
+                    "dept_key": dept_key,                
+                })
+
+            vector_store.add_documents(chunks, ids=ids)
+            print(f"[{dept_key}] Document {filename} added with {len(chunks)} chunks.") 
 
     print(f"Milvus collection `{collection_name}` is ready with ingested documents.")
     return vector_store
@@ -370,44 +382,44 @@ def cerate_milvus_sql_db(
 if __name__ == "__main__":
     folder_path = "./data"
 
-    # milvus_store = create_milvus_doc_db(
-    #     folder_path=folder_path,
-    #     collection_name=os.getenv("MILVUS_COLLECTION", "knowledge_base_doc"),
-    #     drop_if_exists=True,
-    #     chunk_size=2000,
-    #     overlap=500,
-    # )
-
-    # retriever = milvus_store.as_retriever(search_kwargs={"k": 3})
-    # query = "What's my company's mission and values"
-    # results = retriever.invoke(query)
-
-    # for i, doc in enumerate(results, start=1):
-    #     print(f"\n🔹 Result {i}:\n{doc.page_content}\nTags: {doc.metadata}")
-
-    sql_store = cerate_milvus_sql_db(
+    milvus_store = create_milvus_doc_db(
         folder_path=folder_path,
-        collection_name=os.getenv("MILVUS_SQL_COLLECTION", "knowledge_base_sql"),
+        collection_name=os.getenv("MILVUS_COLLECTION", "knowledge_base_doc"),
         drop_if_exists=True,
+        chunk_size=2000,
+        overlap=500,
     )
 
-    # 只查 schema/ddl
-    sql_retriever = sql_store.as_retriever(search_kwargs={
-        "k": 5,
-        "expr": 'metadata["doc_type"] in ["ddl","description"]'
-    })
-    hits = sql_retriever.invoke("users表有哪些字段？email是否唯一？")
-    for i, doc in enumerate(hits, 1):
-        print(f"\n[SQL KB] Hit {i} type={doc.metadata.get('doc_type')} table={doc.metadata.get('table_name')}")
-        print(doc.page_content)
+    retriever = milvus_store.as_retriever(search_kwargs={"k": 3})
+    query = "What's my company's mission and values"
+    results = retriever.invoke(query)
 
-    # 查 few-shot
-    example_retriever = sql_store.as_retriever(search_kwargs={
-       "k": 3,
-       "expr": 'metadata["doc_type"] == "qsql" and metadata["database"] == "ecommerce"'
-    })
-    example_hits = example_retriever.invoke("查询每个用户的订单数量")
-    for i, doc in enumerate(example_hits, 1):
-        print(f"\n[QSQL] Hit {i} score? (see retriever) db={doc.metadata.get('database')}")
-        print("Q:", doc.metadata.get("question"))
-        print("SQL:", doc.metadata.get("sql"))
+    for i, doc in enumerate(results, start=1):
+        print(f"\n🔹 Result {i}:\n{doc.page_content}\nTags: {doc.metadata}")
+
+    # sql_store = cerate_milvus_sql_db(
+    #     folder_path=folder_path,
+    #     collection_name=os.getenv("MILVUS_SQL_COLLECTION", "knowledge_base_sql"),
+    #     drop_if_exists=True,
+    # )
+
+    # # 只查 schema/ddl
+    # sql_retriever = sql_store.as_retriever(search_kwargs={
+    #     "k": 5,
+    #     "expr": 'metadata["doc_type"] in ["ddl","description"]'
+    # })
+    # hits = sql_retriever.invoke("users表有哪些字段？email是否唯一？")
+    # for i, doc in enumerate(hits, 1):
+    #     print(f"\n[SQL KB] Hit {i} type={doc.metadata.get('doc_type')} table={doc.metadata.get('table_name')}")
+    #     print(doc.page_content)
+
+    # # 查 few-shot
+    # example_retriever = sql_store.as_retriever(search_kwargs={
+    #    "k": 3,
+    #    "expr": 'metadata["doc_type"] == "qsql" and metadata["database"] == "ecommerce"'
+    # })
+    # example_hits = example_retriever.invoke("查询每个用户的订单数量")
+    # for i, doc in enumerate(example_hits, 1):
+    #     print(f"\n[QSQL] Hit {i} score? (see retriever) db={doc.metadata.get('database')}")
+    #     print("Q:", doc.metadata.get("question"))
+    #     print("SQL:", doc.metadata.get("sql"))

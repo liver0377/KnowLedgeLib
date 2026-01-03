@@ -1,4 +1,3 @@
-# streamlit_app.py
 import asyncio
 import os
 import logging
@@ -12,16 +11,19 @@ import streamlit as st
 from dotenv import load_dotenv
 from pydantic import ValidationError
 
+# 假设这些是你本地的模块，保持原样导入
 from client import AgentClient, AgentClientError
 from schema import ChatHistory, ChatMessage
 from schema.task_data import TaskData, TaskDataStatus
 from voice import VoiceManager
 
+# --- UI 配置 ---
 APP_TITLE = "Agent Service Toolkit"
 APP_ICON = "🧰"
+PAGE_LAYOUT = "wide" # 使用宽屏模式更适合展示对话和复杂的工具输出
 
 # Session-state keys
-AUTH_USER_KEY = "auth_user"          # dict returned by /auth/me (or None)
+AUTH_USER_KEY = "auth_user"
 AGENT_CLIENT_KEY = "agent_client"
 THREAD_ID_KEY = "thread_id"
 MESSAGES_KEY = "messages"
@@ -33,50 +35,111 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 
+# --- 自定义 CSS ---
+# 这段 CSS 用于覆盖 Streamlit 默认样式，增加现代感
+CUSTOM_CSS = """
+<style>
+    /* 全局字体优化 */
+    html, body, [class*="css"] {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    }
+    
+    /* 隐藏 Streamlit 默认的顶部汉堡菜单和 footer */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    
+    /* 调整主容器顶部内边距，减少留白 */
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 5rem !important;
+    }
+
+    /* 侧边栏样式优化 */
+    [data-testid="stSidebar"] {
+        background-color: #f7f9fb;
+        border-right: 1px solid #e0e6ed;
+    }
+    
+    /* 侧边栏标题样式 */
+    [data-testid="stSidebarUserContent"] h2 {
+        color: #1e293b;
+        font-size: 1.2rem;
+        margin-bottom: 1.5rem;
+    }
+
+    /* 登录卡片样式 */
+    div[data-testid="stForm"] {
+        border: 1px solid #e0e6ed;
+        border-radius: 12px;
+        padding: 1.5rem;
+        background-color: white;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    }
+
+    /* 聊天消息气泡优化 - AI */
+    [data-testid="stChatMessage"] {
+        padding: 1rem;
+        border-radius: 12px;
+        margin-bottom: 1rem;
+        border: 1px solid transparent;
+    }
+    [data-testid="stChatMessage"][data-testid="chatAvatarIcon-ai"] {
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
+    }
+    
+    /* 聊天输入框悬浮优化 */
+    [data-testid="stChatInput"] {
+        border-radius: 20px;
+        border: 1px solid #cbd5e1;
+    }
+
+    /* 状态/工具输出框美化 */
+    [data-testid="stExpander"] {
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        background-color: #ffffff;
+    }
+    
+    /* 按钮统一样式 */
+    button[kind="secondary"] {
+        border: 1px solid #cbd5e1;
+        color: #475569;
+    }
+    button[kind="primary"] {
+        background-color: #0f172a; /* 深色主题色 */
+        border: none;
+    }
+</style>
+"""
+
 def _is_unauthorized(err: Exception) -> bool:
-    # AgentClientError messages look like: "Me failed: 401 {...}"
     return " 401 " in str(err) or str(err).startswith("401") or "401_UNAUTHORIZED" in str(err)
 
-
 def _mirror_cookies(src: Any, dst: Any) -> None:
-    """
-    Copy cookie jar from one httpx client to the other.
-    Works for httpx.Client and httpx.AsyncClient.
-    """
     try:
         dst.cookies.update(src.cookies)
     except Exception:
-        # Best-effort; if it fails, login will still work for the client that owns cookies.
         pass
 
-
 async def _ensure_auth_user(agent_client: AgentClient) -> dict[str, Any] | None:
-    """
-    Try to resolve current login from either async or sync client.
-    Keep st.session_state[AUTH_USER_KEY] updated.
-    Mirror cookies between httpx clients when possible.
-    """
     if AUTH_USER_KEY in st.session_state and st.session_state[AUTH_USER_KEY] is not None:
         return st.session_state[AUTH_USER_KEY]
 
-    # Try async first (because we use async for invoke/stream)
     try:
         user = await agent_client.ame()
         st.session_state[AUTH_USER_KEY] = user
-        # mirror cookies async -> sync (history uses sync)
-        _mirror_cookies(agent_client._aclient, agent_client._client)  # noqa: SLF001
+        _mirror_cookies(agent_client._aclient, agent_client._client)
         return user
     except AgentClientError as e:
         if not _is_unauthorized(e):
-            # unexpected error (network/500)
             raise
 
-    # Try sync (in case cookie jar only exists there)
     try:
         user = await asyncio.to_thread(agent_client.me)
         st.session_state[AUTH_USER_KEY] = user
-        # mirror cookies sync -> async
-        _mirror_cookies(agent_client._client, agent_client._aclient)  # noqa: SLF001
+        _mirror_cookies(agent_client._client, agent_client._aclient)
         return user
     except AgentClientError as e:
         if _is_unauthorized(e):
@@ -84,12 +147,7 @@ async def _ensure_auth_user(agent_client: AgentClient) -> dict[str, Any] | None:
             return None
         raise
 
-
 def _get_user_id_from_me(user: dict[str, Any] | None) -> str:
-    """
-    Use JWT identity as user_id for agent config.
-    The exact key depends on your get_current_user implementation; we defensively check several.
-    """
     if not user:
         return str(uuid.uuid4())
     for k in ("sub", "user_id", "id", "uid"):
@@ -98,48 +156,42 @@ def _get_user_id_from_me(user: dict[str, Any] | None) -> str:
             return str(v)
     return str(uuid.uuid4())
 
-
 async def _do_login(agent_client: AgentClient, username: str, password: str) -> dict[str, Any]:
-    """
-    Login once via sync client (in a thread), then mirror cookies to async client.
-    Finally call /auth/me to fetch identity.
-    """
     await asyncio.to_thread(agent_client.login, username, password)
-    _mirror_cookies(agent_client._client, agent_client._aclient)  # noqa: SLF001
+    _mirror_cookies(agent_client._client, agent_client._aclient)
     user = await _ensure_auth_user(agent_client)
     if not user:
         raise AgentClientError("Login succeeded but /auth/me still unauthorized")
     return user
 
-
 async def _do_logout(agent_client: AgentClient) -> None:
-    """
-    Logout via sync client (thread), then clear both cookie jars.
-    """
     try:
         await asyncio.to_thread(agent_client.logout)
     except AgentClientError:
-        # If token already expired, treat as logged out anyway
         pass
     try:
-        agent_client._client.cookies.clear()   # noqa: SLF001
+        agent_client._client.cookies.clear()
     except Exception:
         pass
     try:
-        agent_client._aclient.cookies.clear()  # noqa: SLF001
+        agent_client._aclient.cookies.clear()
     except Exception:
         pass
     st.session_state[AUTH_USER_KEY] = None
 
-
 async def main() -> None:
+    # 页面基础配置
     st.set_page_config(
         page_title=APP_TITLE,
         page_icon=APP_ICON,
+        layout=PAGE_LAYOUT, # 使用宽屏
         menu_items={},
     )
+    
+    # 注入自定义 CSS
+    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-    # Hide the streamlit upper-right chrome
+    # 隐藏 Streamlit 自带的状态小组件
     st.html(
         """
         <style>
@@ -165,153 +217,146 @@ async def main() -> None:
             port = os.getenv("PORT", 8080)
             agent_url = f"http://{host}:{port}"
         try:
-            with st.spinner("Connecting to agent service..."):
+            with st.spinner("Initializing system connection..."):
                 st.session_state[AGENT_CLIENT_KEY] = AgentClient(base_url=agent_url)
         except AgentClientError as e:
-            st.error(f"Error connecting to agent service at {agent_url}: {e}")
-            st.markdown("The service might be booting up. Try again in a few seconds.")
+            st.error(f"⚠️ Connection Error: {e}")
+            st.warning("Ensure the backend service is running.")
             st.stop()
 
     agent_client: AgentClient = st.session_state[AGENT_CLIENT_KEY]
 
-    # Resolve auth status (JWT cookie) if possible
     try:
         auth_user = await _ensure_auth_user(agent_client)
     except AgentClientError as e:
         st.error(f"Auth check failed: {e}")
         st.stop()
 
-    # Initialize voice manager (once per session)
     if "voice_manager" not in st.session_state:
         st.session_state.voice_manager = VoiceManager.from_env()
     voice = st.session_state.voice_manager
 
     # -------------------------
-    # Sidebar UI (login-first)
+    # Sidebar UI (Redesigned)
     # -------------------------
     with st.sidebar:
-        st.header(f"{APP_ICON} {APP_TITLE}")
-        st.caption("AI agent UI (FastAPI + LangGraph + Streamlit)")
+        # 顶部 Logo 区域
+        st.markdown(f"### {APP_ICON} **{APP_TITLE}**")
+        st.caption("Powered by LangGraph & FastAPI")
+        st.markdown("---")
 
-        # Login block
+        # Login Logic UI
         if auth_user:
             user_id_for_display = _get_user_id_from_me(auth_user)
             roles = auth_user.get("roles", [])
-            st.success(f"Logged in: `{user_id_for_display}`")
-            if roles:
-                st.caption(f"Roles: {', '.join(map(str, roles))}")
-
-            if st.button(":material/logout: Logout", use_container_width=True):
-                await _do_logout(agent_client)
-                # Reset chat UI state on logout
-                st.session_state.pop(MESSAGES_KEY, None)
-                st.session_state.pop(THREAD_ID_KEY, None)
-                st.session_state.pop("last_audio", None)
-                st.rerun()
+            
+            with st.container(border=True):
+                st.markdown(f"**👤 Current User**")
+                st.code(f"{user_id_for_display}", language="text")
+                if roles:
+                    st.caption(f"Roles: {', '.join(map(str, roles))}")
+                
+                if st.button("Logout", icon="👋", use_container_width=True, type="secondary"):
+                    await _do_logout(agent_client)
+                    st.session_state.pop(MESSAGES_KEY, None)
+                    st.session_state.pop(THREAD_ID_KEY, None)
+                    st.session_state.pop("last_audio", None)
+                    st.rerun()
         else:
-            st.warning("Please log in to continue.")
+            # 登录表单美化
+            st.info("🔐 Access Required")
+            st.write("Please sign in to access the agent tools.")
             with st.form("login_form", clear_on_submit=False):
-                username = st.text_input("Username", placeholder="e.g. ryan / viewer")
-                password = st.text_input("Password", type="password", placeholder="Password")
-                submitted = st.form_submit_button("Log in", use_container_width=True)
+                username = st.text_input("Username")
+                password = st.text_input("Password", type="password")
+                st.markdown("<br>", unsafe_allow_html=True) # Spacer
+                submitted = st.form_submit_button("Sign In", use_container_width=True, type="primary")
 
             if submitted:
                 if not username or not password:
-                    st.error("Please enter username and password.")
+                    st.error("Missing credentials.")
                 else:
                     try:
-                        with st.spinner("Logging in..."):
+                        with st.spinner("Verifying credentials..."):
                             st.session_state[AUTH_USER_KEY] = await _do_login(
                                 agent_client, username=username, password=password
                             )
-                        st.toast("Logged in", icon="✅")
+                        st.toast("Welcome back!", icon="✅")
                         st.rerun()
                     except AgentClientError as e:
                         st.error(f"Login failed: {e}")
 
-            st.info("You must log in (JWT cookie) to use /invoke, /stream, /history, /feedback.")
             st.stop()
 
-        # After this point, user is logged in
-
-        if st.button(":material/chat: New Chat", use_container_width=True):
+        # After Login Controls
+        st.markdown("### 💬 Chat Control")
+        if st.button("Start New Conversation", icon="➕", use_container_width=True, type="primary"):
             st.session_state[MESSAGES_KEY] = []
             st.session_state[THREAD_ID_KEY] = str(uuid.uuid4())
             st.session_state.pop("last_audio", None)
             st.rerun()
 
-        with st.popover(":material/settings: Settings", use_container_width=True):
+        st.markdown("---")
+        
+        # Settings Section
+        with st.expander("⚙️ Configuration", expanded=False):
             model_idx = agent_client.info.models.index(agent_client.info.default_model)
-            model = st.selectbox("LLM to use", options=agent_client.info.models, index=model_idx)
+            model = st.selectbox("LLM Model", options=agent_client.info.models, index=model_idx)
 
             agent_list = [a.key for a in agent_client.info.agents]
             agent_idx = agent_list.index(agent_client.info.default_agent)
-            agent_client.agent = st.selectbox("Agent to use", options=agent_list, index=agent_idx)
+            agent_client.agent = st.selectbox("Agent Persona", options=agent_list, index=agent_idx)
 
-            use_streaming = st.toggle("Stream results", value=True)
+            use_streaming = st.toggle("Enable Streaming", value=True)
 
             enable_audio = st.toggle(
-                "Enable audio generation",
+                "Audio Response",
                 value=True,
                 disabled=not voice or not voice.tts,
-                help="Configure VOICE_TTS_PROVIDER in .env to enable"
-                if not voice or not voice.tts
-                else None,
-                on_change=lambda: st.session_state.pop("last_audio", None)
-                if not st.session_state.get("enable_audio", True)
-                else None,
                 key="enable_audio",
             )
-
-            # Show authenticated identity (from /auth/me)
+            
             me_user = st.session_state.get(AUTH_USER_KEY) or {}
-            st.text_input(
-                "Authenticated user_id (read-only)",
-                value=_get_user_id_from_me(me_user),
-                disabled=True,
-            )
+            st.text_input("Session ID", value=_get_user_id_from_me(me_user), disabled=True)
 
-        @st.dialog("Architecture")
-        def architecture_dialog() -> None:
-            st.image(
-                "https://github.com/JoshuaC215/agent-service-toolkit/blob/main/media/agent_architecture.png?raw=true"
-            )
-            "[View full size on Github](https://github.com/JoshuaC215/agent-service-toolkit/blob/main/media/agent_architecture.png)"
-            st.caption(
-                "App hosted on Streamlit Cloud with FastAPI service running in Azure (example)."
-            )
+        # Tools & Architecture
+        col1, col2 = st.columns(2)
+        with col1:
+             if st.button("Map", icon="🗺️", use_container_width=True):
+                architecture_dialog()
+        with col2:
+             if st.button("Share", icon="🔗", use_container_width=True):
+                share_chat_dialog()
 
-        if st.button(":material/schema: Architecture", use_container_width=True):
-            architecture_dialog()
-
-        with st.popover(":material/policy: Privacy", use_container_width=True):
-            st.write(
-                "Prompts, responses and feedback in this app are anonymously recorded and saved for product evaluation."
-            )
-
-        @st.dialog("Share/resume chat")
-        def share_chat_dialog() -> None:
-            session = st.runtime.get_instance()._session_mgr.list_active_sessions()[0]
-            st_base_url = urllib.parse.urlunparse(
-                [session.client.request.protocol, session.client.request.host, "", "", "", ""]
-            )
-            # if it's not localhost, switch to https by default
-            if not st_base_url.startswith("https") and "localhost" not in st_base_url:
-                st_base_url = st_base_url.replace("http", "https")
-
-            # Auth is cookie-based, so recipients still need credentials to view history.
-            chat_url = f"{st_base_url}?thread_id={st.session_state[THREAD_ID_KEY]}"
-            st.markdown(f"**Chat URL:**\n```text\n{chat_url}\n```")
-            st.info("Note: the viewer must log in to access protected endpoints.")
-
-        if st.button(":material/upload: Share/resume chat", use_container_width=True):
-            share_chat_dialog()
-
-        "[View the source code](https://github.com/JoshuaC215/agent-service-toolkit)"
-        st.caption("Made with :material/favorite: in Streamlit")
+        st.markdown("---")
+        with st.popover("Privacy Policy", use_container_width=True):
+            st.caption("Data Usage Policy")
+            st.write("All interactions are recorded anonymously for quality assurance and model evaluation.")
 
     # -------------------------
-    # Main chat logic (requires auth)
+    # Helper Dialogs
+    # -------------------------
+    @st.dialog("System Architecture")
+    def architecture_dialog() -> None:
+        st.image("https://github.com/JoshuaC215/agent-service-toolkit/blob/main/media/agent_architecture.png?raw=true")
+        st.caption("Hosted on Streamlit Cloud • FastAPI Backend • Azure/AWS")
+
+    @st.dialog("Share Session")
+    def share_chat_dialog() -> None:
+        session = st.runtime.get_instance()._session_mgr.list_active_sessions()[0]
+        st_base_url = urllib.parse.urlunparse(
+            [session.client.request.protocol, session.client.request.host, "", "", "", ""]
+        )
+        if not st_base_url.startswith("https") and "localhost" not in st_base_url:
+            st_base_url = st_base_url.replace("http", "https")
+        chat_url = f"{st_base_url}?thread_id={st.session_state[THREAD_ID_KEY]}"
+        
+        st.success("Link generated successfully!")
+        st.code(chat_url, language="text")
+        st.info("🔒 Note: Authentication is required to view this history.")
+
+    # -------------------------
+    # Main Chat Area
     # -------------------------
     auth_user = st.session_state.get(AUTH_USER_KEY)
     user_id = _get_user_id_from_me(auth_user)
@@ -323,7 +368,7 @@ async def main() -> None:
             messages: list[ChatMessage] = []
         else:
             try:
-                messages = agent_client.get_history(thread_id=thread_id).messages  # protected
+                messages = agent_client.get_history(thread_id=thread_id).messages
             except AgentClientError as e:
                 if _is_unauthorized(e):
                     st.session_state[AUTH_USER_KEY] = None
@@ -336,32 +381,36 @@ async def main() -> None:
 
     messages: list[ChatMessage] = st.session_state[MESSAGES_KEY]
 
-    # Welcome (only when no messages)
+    # Welcome Splash Screen (Only when empty)
     if len(messages) == 0:
+        st.markdown(f"""
+        <div style="text-align: center; margin-top: 50px;">
+            <h1>👋 Welcome to {APP_TITLE}</h1>
+            <p style="color: grey; font-size: 1.1em;">
+                Your AI-powered assistant for research, HR policies, and daily tasks.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Select prompt based on agent
         match agent_client.agent:
-            case "chatbot":
-                WELCOME = "Hello! I'm a simple chatbot. Ask me anything!"
-            case "interrupt-agent":
-                WELCOME = "Hello! I'm an interrupt agent. Tell me your birthday and I will predict your personality!"
-            case "research-assistant":
-                WELCOME = "Hello! I'm an AI-powered research assistant with web search and a calculator. Ask me anything!"
-            case "rag-assistant":
-                WELCOME = """Hello! I'm an AI-powered Company Policy & HR assistant.
-I can help you find information about benefits, remote work, time-off policies, company values, and more. Ask me anything!"""
-            case _:
-                WELCOME = "Hello! I'm an AI agent. Ask me anything!"
-
-        with st.chat_message("ai"):
+            case "chatbot": WELCOME = "I'm ready to chat! How can I help?"
+            case "interrupt-agent": WELCOME = "I can predict your personality based on your birthday."
+            case "research-assistant": WELCOME = "I have web access. What would you like to research?"
+            case "rag-assistant": WELCOME = "Ask me about company policies, benefits, or HR topics."
+            case _: WELCOME = "I'm an AI agent. Ask me anything!"
+            
+        with st.chat_message("ai", avatar="🤖"):
             st.write(WELCOME)
-
-    # draw_messages() expects an async iterator over messages
+    
+    # Message Loop
     async def amessage_iter() -> AsyncGenerator[ChatMessage, None]:
         for m in messages:
             yield m
 
     await draw_messages(amessage_iter())
 
-    # Render saved audio for the last AI message (if it exists)
+    # Audio Playback
     enable_audio = st.session_state.get("enable_audio", True)
     if (
         voice
@@ -375,38 +424,35 @@ I can help you find information about benefits, remote work, time-off policies, 
             audio_data = st.session_state.last_audio
             st.audio(audio_data["data"], format=audio_data["format"])
 
-    # user input
-    if voice:
-        user_input = voice.get_chat_input()
-    else:
-        user_input = st.chat_input()
+    # Input Area
+    input_container = st.container()
+    with input_container:
+        if voice:
+            user_input = voice.get_chat_input()
+        else:
+            user_input = st.chat_input("Type your message here...")
 
     if user_input:
         messages.append(ChatMessage(type="human", content=user_input))
-        st.chat_message("human").write(user_input)
+        st.chat_message("human", avatar="👤").write(user_input)
 
-        # read settings values (they exist because user is logged in)
-        # If settings popover never opened, fall back to defaults
+        # Settings retrieval
         model = getattr(agent_client.info, "default_model", None)
-        use_streaming = True  # default
-        # Try to read from widget state if created; otherwise default is fine
-        # (Streamlit doesn't expose a reliable way to check whether popover ran)
         try:
-            use_streaming = st.session_state.get("Stream results", True)  # may not exist
+            use_streaming = st.session_state.get("Enable Streaming", True)
         except Exception:
-            pass
+            use_streaming = True
 
         try:
             if use_streaming:
                 stream = agent_client.astream(
                     message=user_input,
-                    model=st.session_state.get("model", model) or model,
+                    model=st.session_state.get("LLM Model", model) or model,
                     thread_id=st.session_state[THREAD_ID_KEY],
                     user_id=user_id,
                 )
                 await draw_messages(stream, is_new=True)
 
-                # TTS after streaming
                 if voice and enable_audio and st.session_state[MESSAGES_KEY]:
                     last_msg = st.session_state[MESSAGES_KEY][-1]
                     if last_msg.type == "ai" and last_msg.content:
@@ -416,14 +462,15 @@ I can help you find information about benefits, remote work, time-off policies, 
                             audio_only=True,
                         )
             else:
-                response = await agent_client.ainvoke(
-                    message=user_input,
-                    model=st.session_state.get("model", model) or model,
-                    thread_id=st.session_state[THREAD_ID_KEY],
-                    user_id=user_id,
-                )
+                with st.spinner("Thinking..."):
+                    response = await agent_client.ainvoke(
+                        message=user_input,
+                        model=st.session_state.get("LLM Model", model) or model,
+                        thread_id=st.session_state[THREAD_ID_KEY],
+                        user_id=user_id,
+                    )
                 messages.append(response)
-                with st.chat_message("ai"):
+                with st.chat_message("ai", avatar="🤖"):
                     if voice and enable_audio:
                         voice.render_message(response.content)
                     else:
@@ -438,21 +485,18 @@ I can help you find information about benefits, remote work, time-off policies, 
             st.error(f"Error generating response: {e}")
             st.stop()
 
-    # feedback (protected)
+    # Feedback
     if len(messages) > 0 and st.session_state.get(LAST_MESSAGE_KEY):
         with st.session_state[LAST_MESSAGE_KEY]:
             await handle_feedback()
-
 
 async def draw_messages(
     messages_agen: AsyncGenerator[ChatMessage | str, None],
     is_new: bool = False,
 ) -> None:
-    # Keep track of the last message container
     last_message_type = None
     st.session_state[LAST_MESSAGE_KEY] = None
 
-    # Placeholder for intermediate streaming tokens
     streaming_content = ""
     streaming_placeholder = None
 
@@ -461,23 +505,18 @@ async def draw_messages(
             if not streaming_placeholder:
                 if last_message_type != "ai":
                     last_message_type = "ai"
-                    st.session_state[LAST_MESSAGE_KEY] = st.chat_message("ai")
+                    st.session_state[LAST_MESSAGE_KEY] = st.chat_message("ai", avatar="🤖")
                 with st.session_state[LAST_MESSAGE_KEY]:
                     streaming_placeholder = st.empty()
 
             streaming_content += msg
-            streaming_placeholder.write(streaming_content)
+            streaming_placeholder.markdown(streaming_content + "▌") # Cursor effect
             continue
-
-        if not isinstance(msg, ChatMessage):
-            st.error(f"Unexpected message type: {type(msg)}")
-            st.write(msg)
-            st.stop()
 
         match msg.type:
             case "human":
                 last_message_type = "human"
-                st.chat_message("human").write(msg.content)
+                st.chat_message("human", avatar="👤").write(msg.content)
 
             case "ai":
                 if is_new:
@@ -485,12 +524,12 @@ async def draw_messages(
 
                 if last_message_type != "ai":
                     last_message_type = "ai"
-                    st.session_state[LAST_MESSAGE_KEY] = st.chat_message("ai")
+                    st.session_state[LAST_MESSAGE_KEY] = st.chat_message("ai", avatar="🤖")
 
                 with st.session_state[LAST_MESSAGE_KEY]:
                     if msg.content:
                         if streaming_placeholder:
-                            streaming_placeholder.write(msg.content)
+                            streaming_placeholder.markdown(msg.content) # Finalize markdown
                             streaming_content = ""
                             streaming_placeholder = None
                         else:
@@ -500,13 +539,16 @@ async def draw_messages(
                         call_results = {}
                         for tool_call in msg.tool_calls:
                             if "transfer_to" in tool_call["name"]:
-                                label = f"""💼 Sub Agent: {tool_call["name"]}"""
+                                label = f"""🔄 Handoff: {tool_call["name"]}"""
+                                state_icon = "running" if is_new else "complete"
                             else:
-                                label = f"""🛠️ Tool Call: {tool_call["name"]}"""
+                                label = f"""🛠️ Tool: {tool_call["name"]}"""
+                                state_icon = "running" if is_new else "complete"
 
+                            # Use status consistent with theme
                             status = st.status(
                                 label,
-                                state="running" if is_new else "complete",
+                                state=state_icon,
                             )
                             call_results[tool_call["id"]] = status
 
@@ -518,29 +560,30 @@ async def draw_messages(
                                 break
 
                             status = call_results[tool_call["id"]]
-                            status.write("Input:")
-                            status.write(tool_call["args"])
+                            status.markdown("**Input Parameters:**")
+                            status.code(tool_call["args"], language="json") 
+                            
                             tool_result: ChatMessage = await anext(messages_agen)
-
-                            if tool_result.type != "tool":
-                                st.error(f"Unexpected ChatMessage type: {tool_result.type}")
-                                st.write(tool_result)
-                                st.stop()
 
                             if is_new:
                                 st.session_state[MESSAGES_KEY].append(tool_result)
                             if tool_result.tool_call_id:
                                 status = call_results[tool_result.tool_call_id]
-                            status.write("Output:")
-                            status.write(tool_result.content)
+                            
+                            status.markdown("**Result Output:**")
+                            # Try to format JSON output nicely
+                            try:
+                                status.json(tool_result.content)
+                            except:
+                                status.write(tool_result.content)
+                                
                             status.update(state="complete")
 
             case "custom":
                 try:
                     task_data: TaskData = TaskData.model_validate(msg.custom_data)
                 except ValidationError:
-                    st.error("Unexpected CustomData message received from agent")
-                    st.write(msg.custom_data)
+                    st.error("Data validation error")
                     st.stop()
 
                 if is_new:
@@ -549,65 +592,62 @@ async def draw_messages(
                 if last_message_type != "task":
                     last_message_type = "task"
                     st.session_state[LAST_MESSAGE_KEY] = st.chat_message(
-                        name="task", avatar=":material/manufacturing:"
+                        name="task", avatar="📊"
                     )
                     with st.session_state[LAST_MESSAGE_KEY]:
                         status = TaskDataStatus()
 
                 status.add_and_draw_task_data(task_data)
 
-            case _:
-                st.error(f"Unexpected ChatMessage type: {msg.type}")
-                st.write(msg)
-                st.stop()
-
-
 async def handle_feedback() -> None:
     if "last_feedback" not in st.session_state:
         st.session_state.last_feedback = (None, None)
 
     latest_run_id = st.session_state[MESSAGES_KEY][-1].run_id
-    feedback = st.feedback("stars", key=latest_run_id)
+    
+    # 使用 container 使反馈区域更紧凑
+    with st.container():
+        cols = st.columns([0.8, 0.2])
+        with cols[0]:
+             st.caption("How was the response?")
+        with cols[1]:
+            feedback = st.feedback("thumbs", key=latest_run_id) # 改用 thumbs 更简洁
 
     if feedback is not None and (latest_run_id, feedback) != st.session_state.last_feedback:
-        normalized_score = (feedback + 1) / 5.0
+        # Map thumbs (0/1) to score (0.0/1.0)
+        normalized_score = 1.0 if feedback == 1 else 0.0
         agent_client: AgentClient = st.session_state[AGENT_CLIENT_KEY]
         try:
             await agent_client.acreate_feedback(
                 run_id=latest_run_id,
-                key="human-feedback-stars",
+                key="human-feedback-thumbs",
                 score=normalized_score,
-                kwargs={"comment": "In-line human feedback"},
+                kwargs={"comment": "Thumbs feedback"},
             )
-        except AgentClientError as e:
-            if _is_unauthorized(e):
-                st.session_state[AUTH_USER_KEY] = None
-                st.error("Session expired. Please log in again.")
-                st.rerun()
-            st.error(f"Error recording feedback: {e}")
-            st.stop()
+        except AgentClientError:
+           pass # Ignore feedback errors softly
 
         st.session_state.last_feedback = (latest_run_id, feedback)
-        st.toast("Feedback recorded", icon=":material/reviews:")
-
+        st.toast("Feedback received!", icon="🙏")
 
 async def handle_sub_agent_msgs(messages_agen, status, is_new):
     nested_popovers = {}
-
     first_msg = await anext(messages_agen)
     if is_new:
         st.session_state[MESSAGES_KEY].append(first_msg)
 
     while True:
         sub_msg = await anext(messages_agen)
-
         if is_new:
             st.session_state[MESSAGES_KEY].append(sub_msg)
 
         if sub_msg.type == "tool" and sub_msg.tool_call_id in nested_popovers:
             popover = nested_popovers[sub_msg.tool_call_id]
-            popover.write("**Output:**")
-            popover.write(sub_msg.content)
+            popover.markdown("**Output:**")
+            try:
+                popover.json(sub_msg.content)
+            except:
+                 popover.write(sub_msg.content)
             continue
 
         if (
@@ -615,12 +655,12 @@ async def handle_sub_agent_msgs(messages_agen, status, is_new):
             and sub_msg.tool_calls
             and any("transfer_back_to" in tc.get("name", "") for tc in sub_msg.tool_calls)
         ):
+            # Handle return logic
             for tc in sub_msg.tool_calls:
-                if "transfer_back_to" in tc.get("name", ""):
+                 if "transfer_back_to" in tc.get("name", ""):
                     transfer_result = await anext(messages_agen)
                     if is_new:
                         st.session_state[MESSAGES_KEY].append(transfer_result)
-
             if status:
                 status.update(state="complete")
             break
@@ -633,18 +673,17 @@ async def handle_sub_agent_msgs(messages_agen, status, is_new):
                 for tc in sub_msg.tool_calls:
                     if "transfer_to" in tc["name"]:
                         nested_status = status.status(
-                            f"""💼 Sub Agent: {tc["name"]}""",
+                            f"""🔄 Sub Agent: {tc["name"]}""",
                             state="running" if is_new else "complete",
                             expanded=True,
                         )
                         await handle_sub_agent_msgs(messages_agen, nested_status, is_new)
                     else:
-                        popover = status.popover(f"{tc['name']}", icon="🛠️")
-                        popover.write(f"**Tool:** {tc['name']}")
-                        popover.write("**Input:**")
-                        popover.write(tc["args"])
+                        popover = status.popover(f"{tc['name']}", icon="🔧")
+                        popover.markdown(f"**Tool:** `{tc['name']}`")
+                        popover.markdown("**Input:**")
+                        popover.code(tc["args"], language="json")
                         nested_popovers[tc["id"]] = popover
-
 
 if __name__ == "__main__":
     asyncio.run(main())
