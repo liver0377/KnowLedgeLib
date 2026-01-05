@@ -1,4 +1,4 @@
-:root {
+/* :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
@@ -76,4 +76,8 @@ button:focus-visible {
   button {
     background-color: #f9f9f9;
   }
-}
+} */
+:root { font-family: "Inter", system-ui, -apple-system, sans-serif; background:#f6f7fb; color:#0f172a; }
+body { margin:0; min-height:100vh; background:#f6f7fb; }
+#app { height:100vh; }
+

@@ -1,4 +1,4 @@
-from typing import Any, Literal, NotRequired
+from typing import Any, Literal, NotRequired, Optional
 
 from pydantic import BaseModel, Field, SerializeAsAny
 from typing_extensions import TypedDict
@@ -177,3 +177,29 @@ class ChatHistoryInput(BaseModel):
 
 class ChatHistory(BaseModel):
     messages: list[ChatMessage]
+
+
+class KBFileItem(BaseModel):
+    file_id: str
+    name: str
+    type: Literal["pdf"]
+    dept_key: str
+    size_bytes: int
+    updated_at: str  # ISO string
+    can_view: bool
+    can_edit: bool
+
+class KBFileDetail(BaseModel):
+    file_id: str
+    name: str
+    type: Literal["pdf"]
+    dept_key: str
+    size_bytes: int
+    updated_at: str  # ISO string
+    page_count: Optional[int] = None
+    can_view: bool
+    can_edit: bool
+    
+class KBFilesResponse(BaseModel):
+    items: list[KBFileItem]
+    next_cursor: Optional[int] = None

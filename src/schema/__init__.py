@@ -9,7 +9,10 @@ from schema.schema import (
     ServiceMetadata,
     StreamInput,
     UserInput,
-    LoginInput
+    LoginInput, 
+    KBFileItem,
+    KBFilesResponse,
+    KBFileDetail
 )
 
 __all__ = [
@@ -24,4 +27,7 @@ __all__ = [
     "FeedbackResponse",
     "ChatHistoryInput",
     "ChatHistory",
+    "KBFileItem",
+    "KBFilesResponse",
+    "KBFileDetail"
 ]

@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import LoginPage from "@/pages/LoginPage.vue";
 import ChatPage from "@/pages/ChatPage.vue";
 import { useAuthStore } from "@/stores/auth";
+import PermissionPage from "@/pages/PermissionPage.vue";
 
 const router = createRouter({
   history: createWebHistory(),
@@ -14,6 +15,9 @@ const router = createRouter({
       component: ChatPage,
       meta: { requiresAuth: true },
     },
+    { path: "/permissions",
+      component: PermissionPage,
+      meta: { requiresAuth: true, adminOnly: true } },
   ],
 });
 
@@ -27,6 +31,10 @@ router.beforeEach(async (to) => {
 
   if (to.meta.requiresAuth && !auth.isAuthed) {
     return { path: "/login", query: { redirect: to.fullPath } };
+  }
+
+  if (to.meta.adminOnly && !auth.me?.roles?.includes("admin")) {
+    return "/chat";
   }
 
   if (to.path === "/login" && auth.isAuthed) {

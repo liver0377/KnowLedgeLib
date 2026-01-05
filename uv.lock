@@ -53,6 +53,7 @@ dependencies = [
     { name = "pymysql" },
     { name = "pyowm" },
     { name = "pypdf" },
+    { name = "pypdf2" },
     { name = "python-dotenv" },
     { name = "sentence-transformers" },
     { name = "setuptools" },
@@ -124,6 +125,7 @@ requires-dist = [
     { name = "pymysql", specifier = ">=1.1.2" },
     { name = "pyowm", specifier = "~=3.3.0" },
     { name = "pypdf", specifier = "~=5.3.0" },
+    { name = "pypdf2", specifier = ">=3.0.1" },
     { name = "python-dotenv", specifier = "~=1.0.1" },
     { name = "sentence-transformers", specifier = ">=5.2.0" },
     { name = "setuptools", specifier = "~=75.6.0" },
@@ -4043,6 +4045,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/da/5b/67df68ec4b934aae9ca89edfb43a869c5edb3bd504dd275be9e83001d3e9/pypdf-5.3.1.tar.gz", hash = "sha256:0b9b715252b3c60bacc052e6a780e8b742cee9b9a2135f6007bb018e22a5adad", size = 5011845, upload-time = "2025-03-02T09:03:39.457Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/0c/75da081f5948e07f373a92087e4808739a3248d308f01c78c9bd4a51defa/pypdf-5.3.1-py3-none-any.whl", hash = "sha256:20ea5b8686faad1b695fda054462b667d5e5f51e25fbbc092f12c5e0bb20d738", size = 302042, upload-time = "2025-03-02T09:03:36.679Z" },
+]
+
+[[package]]
+name = "pypdf2"
+version = "3.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9f/bb/18dc3062d37db6c491392007dfd1a7f524bb95886eb956569ac38a23a784/PyPDF2-3.0.1.tar.gz", hash = "sha256:a74408f69ba6271f71b9352ef4ed03dc53a31aa404d29b5d31f53bfecfee1440", size = 227419, upload-time = "2022-12-31T10:36:13.13Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8e/5e/c86a5643653825d3c913719e788e41386bee415c2b87b4f955432f2de6b2/pypdf2-3.0.1-py3-none-any.whl", hash = "sha256:d16e4205cfee272fbdc0568b68d82be796540b1537508cef59388f839c191928", size = 232572, upload-time = "2022-12-31T10:36:10.327Z" },
 ]
 
 [[package]]

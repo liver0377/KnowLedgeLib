@@ -158,6 +158,9 @@ class Settings(BaseSettings):
     JWT_EXPIRES_SECONDS: int | None = 60 * 60 # 1h
     JWT_SECRET: SecretStr | None = "dev-only-change-me"   # JWT加密秘钥
 
+    # KnowledgeBase 
+    KB_FILES_ROOT: str | None = "data/"
+
     def model_post_init(self, __context: Any) -> None:
         api_keys = {
             Provider.OPENAI: self.OPENAI_API_KEY,

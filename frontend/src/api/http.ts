@@ -3,13 +3,16 @@ export async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const isFormData = options.body instanceof FormData;
+  const headers = isFormData
+    ? options.headers
+    : { "Content-Type": "application/json", ...(options.headers || {}) };
+
   const res = await fetch(path, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
+    headers,
     credentials: "include",
+    body: isFormData ? options.body : options.body ?? undefined,
   });
 
   if (!res.ok) {
@@ -23,3 +26,5 @@ export async function apiFetch<T>(
   }
   return (await res.json()) as T;
 }
+
+

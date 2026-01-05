@@ -1,18 +1,21 @@
 import inspect
 import json
+import os
 import logging
 import warnings
-import time
-import jwt
+from pathlib import Path
 from jwt import PyJWKError
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Annotated, Any
-from uuid import UUID, uuid4
+from urllib.parse import quote
+from typing import Annotated, Any, Optional, Tuple
+from uuid import UUID, uuid4, uuid5, NAMESPACE_URL
 from passlib.context import CryptContext
+from datetime import datetime, timezone
 
+from fastapi import Query
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, status, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from langchain_core._api import LangChainBetaWarning
@@ -37,7 +40,10 @@ from schema import (
     ServiceMetadata,
     StreamInput,
     UserInput,
-    LoginInput
+    LoginInput, 
+    KBFilesResponse,
+    KBFileItem,
+    KBFileDetail
 )
 from service.utils import (
     convert_message_content_to_string,
@@ -46,9 +52,21 @@ from service.utils import (
 )
 from service.auth import (
     create_access_token,
-    get_current_user,
-    get_user_context
+    get_user_context,
+    has_role,
+    require_perm,
+    can_access_dept,
+    can_upload_dept,
+    require_permission,
+    ROLE_ADMIN,
+    ROLE_EDITOR,
+    ROLE_VIEWER,
+    PERM_KB_FILE_LIST,
+    PERM_KB_FILE_DETAIL,
+    PERM_KB_FILE_DOWNLOAD,
+    PERM_KB_FILE_UPLOAD,
 )
+
 
 warnings.filterwarnings("ignore", category=LangChainBetaWarning)
 logger = logging.getLogger(__name__)
@@ -124,20 +142,29 @@ protected_router = APIRouter(dependencies=[Depends(get_user_context)])
 internal_router = APIRouter(prefix="/internal", dependencies=[Depends(verify_bearer)])
 # 专门用于鉴权的接口: /login, /logout, /me
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
+# 知识库专用接口
+kb_router = APIRouter(prefix="/kb", tags=["kb"], dependencies=[Depends(get_user_context)])
+
 
 # TODO: 接上真实用户数据库
 _demo_users = {
     "ryan": {
-        "password_hash": pwd_context.hash("123456"),  # demo
+        "password_hash": pwd_context.hash("123456"),
         "roles": ["admin"],
         "user_id": "user-ryan",
-        "dept_key": "micro_service"
+        "dept_key": "micro_service",
     },
     "viewer": {
         "password_hash": pwd_context.hash("123456"),
         "roles": ["viewer"],
         "user_id": "user-viewer",
-        "dept_key": "AI"
+        "dept_key": "AI",
+    },
+    "ed": {
+        "password_hash": pwd_context.hash("123456"),
+        "roles": ["editor"],
+        "user_id": "user-ed",
+        "dept_key": "AI",
     },
 }
 
@@ -185,6 +212,193 @@ async def info() -> ServiceMetadata:
         default_agent=DEFAULT_AGENT,
         default_model=settings.DEFAULT_MODEL,
     )
+
+def _is_admin(user: dict[str, Any]) -> bool:
+    roles = user.get("roles", []) or []
+    return "admin" in roles
+
+
+def _make_file_id(dept_key: str, filename: str) -> str:
+    # 必须与 list 接口保持一致
+    return str(uuid5(NAMESPACE_URL, f"{dept_key}/{filename}"))
+
+def _can_edit_file(user: dict[str, Any], dept_key: str) -> bool:
+    try:
+        require_perm(user, PERM_KB_FILE_UPLOAD)
+    except HTTPException:
+        return False
+    return can_upload_dept(user, dept_key)
+
+def _find_visible_pdf_by_id(root: Path, user: dict[str, Any], file_id: str) -> Optional[Tuple[Path, str, str]]:
+    # returns (path, dept_key, filename) or None
+    for dept_dir in sorted([p for p in root.iterdir() if p.is_dir()]):
+        dk = dept_dir.name
+        if not can_access_dept(user, dk):
+            continue
+        for f in dept_dir.iterdir():
+            if f.is_file() and f.suffix.lower() == ".pdf":
+                if _make_file_id(dk, f.name) == file_id:
+                    return (f, dk, f.name)
+    return None
+
+@kb_router.get("/files", response_model=KBFilesResponse)
+async def list_kb_files(
+    user: dict[str, Any] = Depends(get_user_context),
+    q: str | None = Query(default=None, description="Search by filename"),
+    dept_key: str | None = Query(default=None, description="Filter by dept_key"),
+    type: str | None = Query(default="pdf", description="Only 'pdf' supported for now"),
+    cursor: int = Query(default=0, ge=0, description="Offset for pagination"),
+    limit: int = Query(default=50, ge=1, le=200, description="Page size"),
+) -> KBFilesResponse:
+    require_perm(user, PERM_KB_FILE_LIST)
+
+    # 1) Resolve KB root dir (可用环境变量覆盖)
+    kb_root = getattr(settings, "KB_FILES_ROOT", None)
+    kb_root = kb_root or os.getenv("KB_FILES_ROOT") 
+    root = Path(kb_root).resolve()
+
+    if not root.exists():
+        # 没有知识库目录也不要 500，前端当空列表即可
+        return KBFilesResponse(items=[], next_cursor=None)
+
+    # 2) Permission: decide visible dept_keys
+    # allowed_dept_keys = set(user.get("allowed_dept_keys", []) or [])
+    # admin = _is_admin(user)
+
+    # 3) Collect pdf files
+    items: list[KBFileItem] = []
+    # 期望结构：root/<dept_key>/*.pdf
+    for dept_dir in sorted([p for p in root.iterdir() if p.is_dir()]):
+        dk = dept_dir.name
+
+        if dept_key and dk != dept_key:
+            continue
+
+        if not can_access_dept(user, dk):
+            continue
+
+        for f in sorted(dept_dir.iterdir()):
+            if not f.is_file():
+                continue
+            if type and type != "pdf":
+                continue
+            if f.suffix.lower() != ".pdf":
+                continue
+
+            name = f.name
+            if q and (q.lower() not in name.lower()):
+                continue
+
+            stat = f.stat()
+            updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+
+            # 稳定 file_id：用 dept_key + 相对路径生成 uuid5
+            fid = _make_file_id(dk, name)
+
+            items.append(
+                KBFileItem(
+                    file_id=fid,
+                    name=name,
+                    type="pdf",
+                    dept_key=dk,
+                    size_bytes=stat.st_size,
+                    updated_at=updated_at,
+                    can_view=True,
+                    can_edit=_can_edit_file(user, dk),
+                )
+            )
+
+    # 4) Pagination: cursor is offset
+    total = len(items)
+    page = items[cursor : cursor + limit]
+    next_cursor = cursor + limit if (cursor + limit) < total else None
+
+    return KBFilesResponse(items=page, next_cursor=next_cursor)
+
+@kb_router.get("/files/{file_id}", response_model=KBFileDetail)
+async def get_kb_file_detail(
+    file_id: str,
+    user: dict[str, Any] = Depends(get_user_context),
+) -> KBFileDetail:
+    require_perm(user, PERM_KB_FILE_DETAIL)
+
+    # 1) Resolve KB root dir
+    kb_root = getattr(settings, "KB_FILES_ROOT", None)
+    kb_root = kb_root or os.getenv("KB_FILES_ROOT")
+    root = Path(kb_root).resolve()
+
+    if not root.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    # 2) Use helper to find visible pdf by file_id
+    found = _find_visible_pdf_by_id(root, user, file_id)
+    if not found:
+        # 不区分“不存在”和“无权限”，统一 404
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    target_path, target_dept, target_name = found
+
+    stat = target_path.stat()
+    updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+
+    # 3) Try to compute page_count (optional)
+    page_count: int | None = None
+    try:
+        from pypdf import PdfReader  # type: ignore
+        reader = PdfReader(str(target_path))
+        page_count = len(reader.pages)
+    except Exception:
+        try:
+            from PyPDF2 import PdfReader  # type: ignore
+            reader = PdfReader(str(target_path))
+            page_count = len(reader.pages)
+        except Exception:
+            page_count = None
+
+    return KBFileDetail(
+        file_id=file_id,
+        name=target_name,
+        type="pdf",
+        dept_key=target_dept,
+        size_bytes=stat.st_size,
+        updated_at=updated_at,
+        page_count=page_count,
+        can_view=True,
+        can_edit=_can_edit_file(user, target_dept),
+    )
+
+
+@kb_router.get("/files/{file_id}/download")
+async def download_kb_file(
+    file_id: str,
+    user: dict[str, Any] = Depends(get_user_context),
+) -> FileResponse:
+    require_perm(user, PERM_KB_FILE_DOWNLOAD)
+
+    kb_root = getattr(settings, "KB_FILES_ROOT", None) or os.getenv("KB_FILES_ROOT") or "./kb_files"
+    root = Path(kb_root).resolve()
+
+    if not root.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    found = _find_visible_pdf_by_id(root, user, file_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    pdf_path, dept_key, filename = found  # dept_key 如暂时不用也保留，方便后续扩展
+
+    quoted = quote(filename)
+    headers = {
+        "Content-Disposition": f'inline; filename="{filename}"; filename*=UTF-8\'\'{quoted}'
+    }
+
+    return FileResponse(
+        path=str(pdf_path),
+        media_type="application/pdf",
+        filename=filename,
+        headers=headers,
+    )
+
 
 
 async def _handle_input(user_input: UserInput, agent: AgentGraph, user: dict[str, Any]) -> tuple[dict[str, Any], UUID]:
@@ -509,7 +723,10 @@ async def health_check():
     return health_status
 
 
+
+
 app.include_router(public_router)
 app.include_router(protected_router)
 app.include_router(auth_router)
 app.include_router(internal_router)
+app.include_router(kb_router)

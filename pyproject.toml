@@ -65,6 +65,7 @@ dependencies = [
     "pymysql>=1.1.2",
     "pyjwt>=2.10.1",
     "passlib[bcrypt]>=1.7.4",
+    "pypdf2>=3.0.1",
 ]
 
 [dependency-groups]
