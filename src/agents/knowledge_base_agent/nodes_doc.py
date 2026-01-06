@@ -76,6 +76,9 @@ async def retrieve_documents(state: AgentState, config: RunnableConfig) -> Agent
                 "content": doc.page_content,
                 "relevance_score": doc.metadata.get("score", 0),
                 "dept_key": doc.metadata.get("dept_key"),
+                "file_id": doc.metadata.get("file_id"),  # 用于生成文档链接
+                "filename": doc.metadata.get("filename"),  # 文件名
+                "page": doc.metadata.get("page", 1),  # 页码
             })
 
         return {
@@ -101,7 +104,9 @@ async def prepare_augmented_prompt(state: AgentState, config: RunnableConfig) ->
     formatted_docs = "\n\n".join(
         [
             f"--- Document {i + 1} ---\n"
-            f"Source: {doc.get('source', 'Unknown')}\n"
+            f"File: {doc.get('filename', 'Unknown')}\n"
+            f"Page: {doc.get('page', 1)}\n"
+            f"File ID: {doc.get('file_id', 'N/A')}\n"
             f"Title: {doc.get('title', 'Unknown')}\n\n"
             f"{doc.get('content', '')}"
             for i, doc in enumerate(documents)
@@ -144,5 +149,3 @@ async def acall_model(state: AgentState, config: RunnableConfig) -> AgentState:
     model_runnable = wrap_model(m)
     response = await model_runnable.ainvoke(state, config)
     return {"messages": [response]}
-
-

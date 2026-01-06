@@ -1,6 +1,7 @@
 import os
 import json
 import hashlib
+from uuid import UUID, uuid5, NAMESPACE_URL
 from typing import Optional, Any
 
 from dotenv import load_dotenv
@@ -291,6 +292,10 @@ def create_milvus_doc_db(
             # doc_id 用文件内容 hash，避免同名冲突，也能区分版本
             doc_id = sha1_file(file_path)
 
+            # 生成file_id，用于前端文档链接
+            from uuid import uuid5, NAMESPACE_URL
+            file_id = str(uuid5(NAMESPACE_URL, f"{dept_key}/{filename}"))
+
             for idx, chunk in enumerate(chunks):
                 page = chunk.metadata.get("page", "nil")
 
@@ -306,7 +311,8 @@ def create_milvus_doc_db(
                     "page": page,
                     "chunk_index": idx,
                     "chunk_id": chunk_id,
-                    "dept_key": dept_key,                
+                    "dept_key": dept_key,
+                    "file_id": file_id,  # 用于生成文档链接
                 })
 
             vector_store.add_documents(chunks, ids=ids)
