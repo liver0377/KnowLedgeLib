@@ -213,9 +213,6 @@ async def info() -> ServiceMetadata:
         default_model=settings.DEFAULT_MODEL,
     )
 
-def _is_admin(user: dict[str, Any]) -> bool:
-    roles = user.get("roles", []) or []
-    return "admin" in roles
 
 
 def _make_file_id(dept_key: str, filename: str) -> str:
@@ -260,10 +257,6 @@ async def list_kb_files(
     if not root.exists():
         # 没有知识库目录也不要 500，前端当空列表即可
         return KBFilesResponse(items=[], next_cursor=None)
-
-    # 2) Permission: decide visible dept_keys
-    # allowed_dept_keys = set(user.get("allowed_dept_keys", []) or [])
-    # admin = _is_admin(user)
 
     # 3) Collect pdf files
     items: list[KBFileItem] = []
@@ -389,8 +382,9 @@ async def download_kb_file(
 
     quoted = quote(filename)
     headers = {
-        "Content-Disposition": f'inline; filename="{filename}"; filename*=UTF-8\'\'{quoted}'
+    "Content-Disposition": f'inline; filename*=UTF-8\'\'{quoted}'
     }
+
 
     return FileResponse(
         path=str(pdf_path),
@@ -518,6 +512,8 @@ async def message_generator(
     """
     agent: AgentGraph = get_agent(agent_id)
     kwargs, run_id = await _handle_input(user_input, agent, user)
+    
+    logger.info(f"Starting stream with stream_tokens={user_input.stream_tokens}")
 
     try:
         # Process streamed events from the graph and yield messages over the SSE stream.
@@ -533,6 +529,12 @@ async def message_generator(
             else:
                 # Without subgraphs: (stream_mode, event)
                 stream_mode, event = stream_event
+            
+            # When stream_tokens is enabled, skip updates/custom modes entirely
+            # to avoid overwriting the token-by-token content
+            if user_input.stream_tokens and stream_mode in ["updates", "custom"]:
+                continue
+                
             new_messages = []
             if stream_mode == "updates":
                 for node, updates in event.items():

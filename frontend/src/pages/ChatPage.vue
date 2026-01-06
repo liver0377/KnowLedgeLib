@@ -1,11 +1,17 @@
 ```vue
 <!-- ChatPage.vue -->
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, reactive } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { apiFetch } from "@/api/http";
 import { streamChat } from "@/api/sse";
 import { useAuthStore } from "@/stores/auth";
+import { marked } from "marked";
+
+// 配置 marked 选项
+marked.setOptions({
+  breaks: false, // 使用标准 Markdown 规则（双换行符才是段落）
+});
 
 type KBDoc = {
   file_id: string;
@@ -43,6 +49,7 @@ type UiMessage = {
   runId?: string;
   toolCalls?: ToolCall[];
   toolResults?: Record<string, any>; // tool_call_id -> result
+  _forceUpdate?: number; // 用于强制重新渲染
 };
 
 const auth = useAuthStore();
@@ -64,6 +71,37 @@ const filteredDocs = computed(() =>
   knowledge.value.filter((d) => d.name.toLowerCase().includes(docSearch.value.toLowerCase()))
 );
 
+/** ===== Resizable Sidebar ===== */
+const sidebarWidth = ref<number>(280);
+const resizing = ref(false);
+
+const MIN_SIDEBAR = 220;
+const MAX_SIDEBAR = 520;
+
+function startResize(e: MouseEvent) {
+  resizing.value = true;
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+  e.preventDefault();
+}
+
+function onResizeMove(e: MouseEvent) {
+  if (!resizing.value) return;
+
+  // sidebar 在 layout 左侧，鼠标 x 就是目标宽度
+  const next = Math.min(MAX_SIDEBAR, Math.max(MIN_SIDEBAR, e.clientX));
+  sidebarWidth.value = next;
+}
+
+function stopResize() {
+  if (!resizing.value) return;
+  resizing.value = false;
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
+}
+
+
+
 const pdfUrl = computed(() => {
   if (!activeDoc.value) return "";
   return `/kb/files/${encodeURIComponent(activeDoc.value.file_id)}/download`;
@@ -75,6 +113,10 @@ function openPdf() {
   window.open(pdfUrl.value, "_blank");
 }
 
+function closeDoc() {
+  activeDoc.value = null;
+}
+
 async function loadKnowledge() {
   sidebarLoading.value = true;
   try {
@@ -83,7 +125,9 @@ async function loadKnowledge() {
     const items = Array.isArray(res) ? res : (res.items || []);
     knowledge.value = items;
 
-    activeDoc.value = knowledge.value[0] || null;
+    // 不自动选中第一个文档，重新进入时不显示文件预览
+    // activeDoc.value = knowledge.value[0] || null;
+    activeDoc.value = null;
   } finally {
     sidebarLoading.value = false;
   }
@@ -149,6 +193,19 @@ async function scrollToBottom() {
   await nextTick();
   if (chatBoxRef.value) {
     chatBoxRef.value.scrollTop = chatBoxRef.value.scrollHeight;
+  }
+}
+
+function renderMarkdown(text: string): string {
+  if (!text) return '';
+  try {
+    // 预处理文本: 清理过多的连续空行,但保留段落分隔
+    // 将3个或更多连续换行符替换为2个换行符(标准段落分隔)
+    const cleanedText = text.replace(/\n{3,}/g, '\n\n');
+    return marked.parse(cleanedText) as string;
+  } catch (e) {
+    console.error('Markdown parsing error:', e);
+    return text;
   }
 }
 
@@ -256,14 +313,16 @@ async function send() {
   });
 
   // 2) 放一个 AI 占位消息，用于 token 流式拼接
-  const aiPlaceholder: UiMessage = {
+  const aiPlaceholder = reactive<UiMessage>({
     id: uuid(),
     role: "ai",
     content: "",
     toolCalls: [],
     toolResults: {},
-  };
+    _forceUpdate: 0,
+  });
   messages.value.push(aiPlaceholder);
+
 
   input.value = "";
   await scrollToBottom();
@@ -283,10 +342,17 @@ async function send() {
     // kb_doc_id: activeDoc.value?.id,
   };
 
-  try {
-    await streamChat(streamUrl, payload, (ev) => {
+    try {
+    await streamChat(streamUrl, payload, async (ev) => {
       if (ev.type === "token") {
+        console.log("收到 token:", ev.content);
         aiPlaceholder.content += ev.content;
+        // 强制触发响应式更新
+        aiPlaceholder._forceUpdate = (aiPlaceholder._forceUpdate || 0) + 1;
+        await nextTick();
+        if (chatBoxRef.value) {
+          chatBoxRef.value.scrollTop = chatBoxRef.value.scrollHeight;
+        }
         return;
       }
 
@@ -299,11 +365,17 @@ async function send() {
         const m = ev.content as ChatMsg;
 
         if (m.type === "ai") {
-          // 最终 ai 消息会包含完整 content / tool_calls / run_id
+          // 当使用 stream_tokens 时，完整的 message 事件会覆盖已累积的 token
+          // 只有当 content 为空时才覆盖，保留 token 累积的内容
           if (typeof m.content === "string" && m.content.length > 0) {
-            aiPlaceholder.content = m.content;
+            // 如果已经累积了 token 内容，就不要覆盖了
+            if (!aiPlaceholder.content) {
+              aiPlaceholder.content = m.content;
+            }
           } else if (m.content) {
-            aiPlaceholder.content = JSON.stringify(m.content, null, 2);
+            if (!aiPlaceholder.content) {
+              aiPlaceholder.content = JSON.stringify(m.content, null, 2);
+            }
           }
 
           aiPlaceholder.runId = m.run_id;
@@ -349,17 +421,26 @@ onMounted(async () => {
   await loadInfo();
   await ensureThreadId();
   await loadHistory();
+  window.addEventListener("mousemove", onResizeMove);
+  window.addEventListener("mouseup", stopResize);
 });
+
+onUnmounted(() => {
+  window.removeEventListener("mousemove", onResizeMove);
+  window.removeEventListener("mouseup", stopResize);
+});
+
 </script>
 
 <template>
   <div class="layout">
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" :style="{ width: sidebarWidth + 'px' }">
       <header class="sidebar-header">知识库</header>
 
       <input v-model="docSearch" class="search" placeholder="搜索文档" />
 
+      <div class="sidebar-resizer" @mousedown="startResize"></div>
       <div class="doc-list" v-if="!sidebarLoading">
         <div
           v-for="doc in filteredDocs"
@@ -367,7 +448,7 @@ onMounted(async () => {
           :class="['doc-item', { active: doc.file_id === activeDoc?.file_id }]"
           @click="activeDoc = doc"
         >
-          <div class="title">{{ doc.name }}</div>
+          <div class="title" :title="doc.name">{{ doc.name }}</div>
           <div class="meta">{{ doc.dept_key || "未分组" }}</div>
         </div>
 
@@ -420,12 +501,13 @@ onMounted(async () => {
 
       <!-- Doc preview -->
       <div class="doc-preview" v-if="activeDoc">
-         <div class="doc-title">{{ activeDoc.name }}</div>
-         <div class="doc-path">{{ activeDoc.dept_key }}</div>
+          <div class="doc-title-row">
+            <div>
+              <div class="doc-title">{{ activeDoc.name }}</div>
+            </div>
+            <button class="close-btn" @click="closeDoc" title="关闭">×</button>
+          </div>
 
-         <div style="margin-top: 8px; display:flex; gap: 8px;">
-           <button class="btn" @click="openPdf">新窗口打开</button>
-         </div>
 
          <div style="margin-top: 12px; height: 520px; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
            <iframe
@@ -456,7 +538,13 @@ onMounted(async () => {
               <span v-if="m.runId" class="runid">run_id: {{ m.runId }}</span>
             </div>
 
-            <div class="msg-content">{{ m.content || (m.role === 'ai' && loading ? '...' : '') }}</div>
+            <div class="msg-content" v-if="m.role === 'human'">{{ m.content || '' }}</div>
+            <div 
+              class="msg-content markdown-content" 
+              v-else
+              :key="m._forceUpdate"
+              v-html="renderMarkdown(m.content || '')"
+            ></div>
 
             <!-- Tool calls -->
             <div v-if="m.role === 'ai' && m.toolCalls && m.toolCalls.length" class="toolcalls">
@@ -510,14 +598,30 @@ onMounted(async () => {
 
 /* Sidebar */
 .sidebar {
-  width: 280px;
   border-right: 1px solid #e2e8f0;
   padding: 12px;
   background: #fff;
   display: flex;
   flex-direction: column;
   gap: 10px;
+
+  position: relative;
+  flex: 0 0 auto; /* 避免被 flex 自动挤压 */
 }
+
+.sidebar-resizer {
+  position: absolute;
+  right: -3px;
+  top: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+}
+.sidebar-resizer:hover {
+  background: rgba(15, 23, 42, 0.06);
+}
+
 .sidebar-header {
   font-weight: 700;
 }
@@ -536,25 +640,35 @@ onMounted(async () => {
 }
 .doc-item {
   padding: 10px 10px;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
   cursor: pointer;
   background: #fff;
 }
 .doc-item:hover {
   background: #f8fafc;
+  border-color: #e5e7eb;
 }
 .doc-item.active {
-  border-color: #111827;
+  background: #eef2ff;
+  border-color: #c7d2fe;
 }
 .title {
   font-weight: 600;
   font-size: 13px;
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .meta {
   margin-top: 4px;
   font-size: 12px;
   color: #64748b;
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .hint {
   font-size: 12px;
@@ -662,6 +776,33 @@ onMounted(async () => {
   font-size: 12px;
   color: #64748b;
 }
+
+.doc-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.close-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.close-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
 .doc-summary {
   margin-top: 8px;
   font-size: 13px;
@@ -695,7 +836,6 @@ onMounted(async () => {
   border-radius: 12px;
   padding: 10px 12px;
   border: 1px solid #e5e7eb;
-  white-space: pre-wrap;
   word-break: break-word;
 }
 .msg.human {
@@ -717,6 +857,122 @@ onMounted(async () => {
 }
 .msg-content {
   font-size: 14px;
+}
+
+/* Markdown 样式 */
+.markdown-content {
+  line-height: 1.6;
+  white-space: normal;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.markdown-content h1 {
+  font-size: 1.5em;
+}
+
+.markdown-content h2 {
+  font-size: 1.25em;
+}
+
+.markdown-content h3 {
+  font-size: 1.1em;
+}
+
+.markdown-content p {
+  margin-bottom: 8px;
+}
+
+.markdown-content code {
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.9em;
+}
+
+.markdown-content pre {
+  background: rgba(0, 0, 0, 0.04);
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin-bottom: 12px;
+}
+
+.markdown-content pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.9em;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin-bottom: 12px;
+  padding-left: 24px;
+}
+
+.markdown-content li {
+  margin-bottom: 4px;
+}
+
+.markdown-content blockquote {
+  border-left: 4px solid #6366f1;
+  padding-left: 12px;
+  margin-left: 0;
+  margin-bottom: 12px;
+  color: #64748b;
+}
+
+.markdown-content a {
+  color: #6366f1;
+  text-decoration: underline;
+}
+
+.markdown-content a:hover {
+  color: #4f46e5;
+}
+
+.markdown-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.markdown-content th,
+.markdown-content td {
+  border: 1px solid #e5e7eb;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.markdown-content th {
+  background: rgba(0, 0, 0, 0.04);
+  font-weight: 600;
+}
+
+.markdown-content hr {
+  border: none;
+  border-top: 2px solid #e5e7eb;
+  margin: 16px 0;
+}
+
+.markdown-content strong {
+  font-weight: 700;
+}
+
+.markdown-content em {
+  font-style: italic;
 }
 
 /* Tools */

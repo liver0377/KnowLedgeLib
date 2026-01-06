@@ -18,6 +18,7 @@ export default defineConfig({
       "/history": "http://localhost:8080",
       "/feedback": "http://localhost:8080",
       "/health": "http://localhost:8080",
+      "/kb": "http://localhost:8080",
     },
   },
 });
