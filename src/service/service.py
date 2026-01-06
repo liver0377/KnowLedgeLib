@@ -4,7 +4,6 @@ import os
 import logging
 import warnings
 from pathlib import Path
-from jwt import PyJWKError
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from urllib.parse import quote
