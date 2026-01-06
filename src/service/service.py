@@ -42,7 +42,8 @@ from schema import (
     LoginInput, 
     KBFilesResponse,
     KBFileItem,
-    KBFileDetail
+    KBFileDetail,
+    UpdatePermissionsInput,
 )
 from service.utils import (
     convert_message_content_to_string,
@@ -54,6 +55,7 @@ from service.auth import (
     get_user_context,
     has_role,
     require_perm,
+    require_admin,
     can_access_dept,
     can_upload_dept,
     require_permission,
@@ -143,6 +145,8 @@ internal_router = APIRouter(prefix="/internal", dependencies=[Depends(verify_bea
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 # 知识库专用接口
 kb_router = APIRouter(prefix="/kb", tags=["kb"], dependencies=[Depends(get_user_context)])
+# 管理员接口
+admin_router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(get_user_context)])
 
 
 # TODO: 接上真实用户数据库
@@ -726,8 +730,64 @@ async def health_check():
 
 
 
+# ============== Admin 接口 ==============
+
+
+@admin_router.get("/users")
+async def list_users(user: dict[str, Any] = Depends(get_user_context)):
+    """获取所有用户列表（仅管理员可用）"""
+    require_admin(user)
+
+    result = []
+    for username, u in _demo_users.items():
+        result.append({
+            "id": u["user_id"],
+            "name": username.capitalize(),  # 简单处理：用户名首字母大写作为姓名
+            "username": username,
+            "roles": u["roles"],
+        })
+    return result
+
+
+@admin_router.post("/users/{user_id}/permissions")
+async def update_user_permissions(
+    user_id: str,
+    data: UpdatePermissionsInput,
+    user: dict[str, Any] = Depends(get_user_context),
+):
+    """更新用户权限（仅管理员可用）"""
+    require_admin(user)
+
+    # 找到目标用户
+    target_user = None
+    target_username = None
+    for username, u in _demo_users.items():
+        if u["user_id"] == user_id:
+            target_user = u
+            target_username = username
+            break
+
+    if not target_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    # 验证角色值
+    valid_roles = {"admin", "editor", "viewer"}
+    for role in data.roles:
+        if role not in valid_roles:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid role: {role}. Valid roles are: {valid_roles}"
+            )
+
+    # 更新角色
+    _demo_users[target_username]["roles"] = data.roles
+
+    return {"ok": True, "user_id": user_id, "roles": data.roles}
+
+
 app.include_router(public_router)
 app.include_router(protected_router)
 app.include_router(auth_router)
 app.include_router(internal_router)
 app.include_router(kb_router)
+app.include_router(admin_router)

@@ -203,3 +203,11 @@ class KBFileDetail(BaseModel):
 class KBFilesResponse(BaseModel):
     items: list[KBFileItem]
     next_cursor: Optional[int] = None
+
+
+class UpdatePermissionsInput(BaseModel):
+    """更新用户权限的请求体"""
+    roles: list[str] = Field(
+        description="用户角色列表",
+        examples=[["viewer"], ["editor"], ["admin"]],
+    )

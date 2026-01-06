@@ -12,7 +12,8 @@ from schema.schema import (
     LoginInput, 
     KBFileItem,
     KBFilesResponse,
-    KBFileDetail
+    KBFileDetail,
+    UpdatePermissionsInput,
 )
 
 __all__ = [
@@ -22,12 +23,13 @@ __all__ = [
     "ChatMessage",
     "ServiceMetadata",
     "StreamInput",
-    "LoginInput"
+    "LoginInput",
     "Feedback",
     "FeedbackResponse",
     "ChatHistoryInput",
     "ChatHistory",
     "KBFileItem",
     "KBFilesResponse",
-    "KBFileDetail"
+    "KBFileDetail",
+    "UpdatePermissionsInput",
 ]

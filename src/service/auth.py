@@ -119,6 +119,12 @@ def has_role(user: dict[str, Any], role: str) -> bool:
     return role in (user.get("roles") or [])
 
 
+def require_admin(user: dict[str, Any]) -> None:
+    """检查用户是否有管理员权限，没有则抛出 403 异常"""
+    if not has_role(user, ROLE_ADMIN):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+
+
 def require_perm(user: dict[str, Any], perm: str) -> None:
     """
     RBAC：检查当前用户是否拥有某权限点
