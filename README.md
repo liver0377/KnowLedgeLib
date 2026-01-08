@@ -1,231 +1,444 @@
-# 🧰 AI Agent Service Toolkit
+# 🧰 KnowLedgeLib - AI知识库管理系统
 
-[![build status](https://github.com/JoshuaC215/agent-service-toolkit/actions/workflows/test.yml/badge.svg)](https://github.com/JoshuaC215/agent-service-toolkit/actions/workflows/test.yml) [![codecov](https://codecov.io/github/JoshuaC215/agent-service-toolkit/graph/badge.svg?token=5MTJSYWD05)](https://codecov.io/github/JoshuaC215/agent-service-toolkit) [![Python Version](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2FJoshuaC215%2Fagent-service-toolkit%2Frefs%2Fheads%2Fmain%2Fpyproject.toml)](https://github.com/JoshuaC215/agent-service-toolkit/blob/main/pyproject.toml)
-[![GitHub License](https://img.shields.io/github/license/JoshuaC215/agent-service-toolkit)](https://github.com/JoshuaC215/agent-service-toolkit/blob/main/LICENSE) [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_red.svg)](https://agent-service-toolkit.streamlit.app/)
+一个基于 LangGraph、FastAPI 和 Vue.js 的 AI 知识库管理系统，集成权限控制、文档管理、智能问答等功能。
 
-A full toolkit for running an AI agent service built with LangGraph, FastAPI and Streamlit.
+## 📋 功能特性
 
-It includes a [LangGraph](https://langchain-ai.github.io/langgraph/) agent, a [FastAPI](https://fastapi.tiangolo.com/) service to serve it, a client to interact with the service, and a [Streamlit](https://streamlit.io/) app that uses the client to provide a chat interface. Data structures and settings are built with [Pydantic](https://github.com/pydantic/pydantic).
+- **智能问答**: 基于 LangGraph 的多 Agent 系统，支持复杂的知识查询和推理
+- **文档管理**: 支持 PDF 文档的上传、下载、删除和分类管理
+- **权限控制**: 基于 RBAC 的细粒度权限管理，支持部门和角色级别的访问控制
+- **向量检索**: 使用 Milvus 向量数据库实现高效的文档检索
+- **实时流式响应**: 支持 SSE 流式输出，提供流畅的用户体验
+- **多模态支持**: 支持文本和语音输入输出
+- **权限审批**: 文档上传需要审批流程
 
-This project offers a template for you to easily build and run your own agents using the LangGraph framework. It demonstrates a complete setup from agent definition to user interface, making it easier to get started with LangGraph-based projects by providing a full, robust toolkit.
+## 🏗️ 系统架构
 
-**[🎥 Watch a video walkthrough of the repo and app](https://www.youtube.com/watch?v=pdYVHw_YCNY)**
-
-## Overview
-
-### [Try the app!](https://agent-service-toolkit.streamlit.app/)
-
-<a href="https://agent-service-toolkit.streamlit.app/"><img src="media/app_screenshot.png" width="600"></a>
-
-### Quickstart
-
-Run directly in python
-
-```sh
-# At least one LLM API key is required
-echo 'OPENAI_API_KEY=your_openai_api_key' >> .env
-
-# uv is the recommended way to install agent-service-toolkit, but "pip install ." also works
-# For uv installation options, see: https://docs.astral.sh/uv/getting-started/installation/
-curl -LsSf https://astral.sh/uv/0.7.19/install.sh | sh
-
-# Install dependencies. "uv sync" creates .venv automatically
-uv sync --frozen
-source .venv/bin/activate
-python src/run_service.py
-
-# In another shell
-source .venv/bin/activate
-streamlit run src/streamlit_app.py
+```
+┌─────────────┐      ┌──────────────┐      ┌─────────────┐
+│   Vue.js    │─────▶│   FastAPI    │─────▶│  Milvus    │
+│   Frontend   │      │   Backend    │      │  Vector DB  │
+└─────────────┘      └──────┬───────┘      └─────────────┘
+                          │
+                          │
+                    ┌───────▼───────┐
+                    │     MySQL     │
+                    │   Database    │
+                    └───────────────┘
 ```
 
-Run with docker
+## 📦 环境要求
 
-```sh
-echo 'OPENAI_API_KEY=your_openai_api_key' >> .env
+- Python 3.10+
+- Node.js 18+
+- Docker & Docker Compose
+- MySQL 8.0+
+- Milvus 2.3+
+
+## 🚀 快速开始
+
+### 1. 安装项目依赖
+
+#### 后端依赖安装
+
+```bash
+# 使用 uv 安装（推荐）
+# 安装 uv
+curl -LsSf https://astral.sh/uv/0.7.19/install.sh | sh
+
+# 安装依赖
+uv sync --frozen
+source .venv/bin/activate
+```
+
+或使用 pip：
+
+```bash
+# 创建虚拟环境
+python -m venv .venv
+source .venv/bin/activate
+
+# 安装依赖
+pip install -r pyproject.toml
+```
+
+#### 前端依赖安装
+
+```bash
+cd frontend
+npm install
+```
+
+### 2. 配置环境变量
+
+复制 `.env.example` 并修改：
+
+```bash
+cp .env.example .env
+```
+
+配置必要的环境变量：
+
+```env
+# LLM 配置
+OPENAI_API_KEY=your_openai_api_key
+# 或使用其他 LLM 提供商
+
+# 数据库配置
+DATABASE_URL=mysql+aiomysql://user:password@localhost:3306/knowledgelib
+
+# Milvus 配置
+MILVUS_HOST=localhost
+MILVUS_PORT=19530
+
+# JWT 密钥（必须）
+JWT_SECRET_KEY=your_secret_key_here
+
+# LangSmith 追踪（可选）
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=your_langsmith_api_key
+```
+
+### 3. 启动 MySQL 服务
+
+#### 使用 Docker 启动 MySQL
+
+```bash
+# 创建数据目录
+mkdir -p data/mysql
+
+# 启动 MySQL
+docker run -d \
+  --name mysql-server \
+  -e MYSQL_ROOT_PASSWORD=rootpassword \
+  -e MYSQL_DATABASE=knowledgelib \
+  -e MYSQL_USER=knowledgelib \
+  -e MYSQL_PASSWORD=knowledgelib123 \
+  -p 3306:3306 \
+  -v $(pwd)/data/mysql:/var/lib/mysql \
+  mysql:8.0
+```
+
+或使用 Docker Compose：
+
+```bash
+# 使用 compose.yaml 启动
+docker compose up -d mysql
+```
+
+#### 本地安装 MySQL
+
+如果使用本地 MySQL，确保已安装并启动服务：
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install mysql-server
+sudo systemctl start mysql
+
+# macOS
+brew install mysql
+brew services start mysql
+
+# Windows
+# 下载并安装 MySQL Installer
+```
+
+### 4. 启动 Milvus 服务
+
+#### 使用 Docker 启动 Milvus
+
+```bash
+# 下载 Milvus Compose 文件
+wget https://github.com/milvus-io/milvus/releases/download/v2.3.4/milvus-standalone-docker-compose.yml -O docker-compose-milvus.yml
+
+# 启动 Milvus
+docker compose -f docker-compose-milvus.yml up -d
+```
+
+#### 验证 Milvus 运行状态
+
+```bash
+# 检查 Milvus 状态
+curl http://localhost:19530/healthz
+
+# 应返回：{"status":"ok"}
+```
+
+### 5. 导入数据库数据
+
+#### 创建数据库表结构
+
+```bash
+# 确保已激活虚拟环境
+source .venv/bin/activate
+
+# 执行初始化脚本
+python scripts/create_chroma_db.py
+```
+
+或手动执行 SQL：
+
+```bash
+# 登录 MySQL
+mysql -u knowledgelib -p
+
+# 执行建表脚本
+source scripts/schema.sql
+
+# 执行 RBAC 权限表
+source scripts/rbac_schema.sql
+
+# 导入初始数据
+source scripts/insert.sql
+source scripts/rbac_seed_data.sql
+```
+
+#### 数据库结构说明
+
+- **users**: 用户表
+- **roles**: 角色表
+- **departments**: 部门表
+- **user_departments**: 用户-部门关联表（包含权限信息）
+- **user_roles**: 用户-角色关联表
+- **kb_files**: 知识库文件表
+- **files**: 文件存储表
+
+详细表结构请参考 `docs/数据库设计.md` 和 `docs/RBAC数据库迁移说明.md`
+
+### 6. 导入文档到向量数据库
+
+#### 使用脚本导入
+
+```bash
+# 确保已激活虚拟环境
+source .venv/bin/activate
+
+# 导入文档到 Milvus
+python scripts/insert.py
+```
+
+该脚本会：
+1. 读取 `data/` 目录下的所有 PDF 文档
+2. 使用 PDF 解析器提取文本内容
+3. 分割文本为 chunks
+4. 生成 embedding 向量
+5. 存储到 Milvus 向量数据库
+
+#### 手动添加文档
+
+通过前端界面上传：
+1. 访问 http://localhost:8501
+2. 登录系统
+3. 进入"文件管理"页面
+4. 点击"上传文件"
+5. 选择 PDF 文件并上传
+
+### 7. 启动前后端服务
+
+#### 使用 Docker Compose 启动（推荐）
+
+```bash
+# 启动所有服务
+docker compose up
+
+# 或使用 watch 模式（开发时自动更新）
 docker compose watch
 ```
 
-### Architecture Diagram
+服务访问地址：
+- 前端界面: http://localhost:8501
+- 后端 API: http://localhost:8080
+- API 文档: http://localhost:8080/redoc
 
-<img src="media/agent_architecture.png" width="600">
+#### 手动启动服务
 
-### Key Features
+**启动后端服务**：
 
-1. **LangGraph Agent and latest features**: A customizable agent built using the LangGraph framework. Implements the latest LangGraph v1.0 features including human in the loop with `interrupt()`, flow control with `Command`, long-term memory with `Store`, and `langgraph-supervisor`.
-1. **FastAPI Service**: Serves the agent with both streaming and non-streaming endpoints.
-1. **Advanced Streaming**: A novel approach to support both token-based and message-based streaming.
-1. **Streamlit Interface**: Provides a user-friendly chat interface for interacting with the agent, including voice input and output.
-1. **Multiple Agent Support**: Run multiple agents in the service and call by URL path. Available agents and models are described in `/info`
-1. **Asynchronous Design**: Utilizes async/await for efficient handling of concurrent requests.
-1. **Content Moderation**: Implements LlamaGuard for content moderation (requires Groq API key).
-1. **RAG Agent**: A basic RAG agent implementation using ChromaDB - see [docs](docs/RAG_Assistant.md).
-1. **Feedback Mechanism**: Includes a star-based feedback system integrated with LangSmith.
-1. **Docker Support**: Includes Dockerfiles and a docker compose file for easy development and deployment.
-1. **Testing**: Includes robust unit and integration tests for the full repo.
+```bash
+# 激活虚拟环境
+source .venv/bin/activate
 
-### Key Files
-
-The repository is structured as follows:
-
-- `src/agents/`: Defines several agents with different capabilities
-- `src/schema/`: Defines the protocol schema
-- `src/core/`: Core modules including LLM definition and settings
-- `src/service/service.py`: FastAPI service to serve the agents
-- `src/client/client.py`: Client to interact with the agent service
-- `src/streamlit_app.py`: Streamlit app providing a chat interface
-- `tests/`: Unit and integration tests
-
-## Setup and Usage
-
-1. Clone the repository:
-
-   ```sh
-   git clone https://github.com/JoshuaC215/agent-service-toolkit.git
-   cd agent-service-toolkit
-   ```
-
-2. Set up environment variables:
-   Create a `.env` file in the root directory. At least one LLM API key or configuration is required. See the [`.env.example` file](./.env.example) for a full list of available environment variables, including a variety of model provider API keys, header-based authentication, LangSmith tracing, testing and development modes, and OpenWeatherMap API key.
-
-3. You can now run the agent service and the Streamlit app locally, either with Docker or just using Python. The Docker setup is recommended for simpler environment setup and immediate reloading of the services when you make changes to your code.
-
-### Additional setup for specific AI providers
-
-- [Setting up Ollama](docs/Ollama.md)
-- [Setting up VertexAI](docs/VertexAI.md)
-- [Setting up RAG with ChromaDB](docs/RAG_Assistant.md)
-
-### Building or customizing your own agent
-
-To customize the agent for your own use case:
-
-1. Add your new agent to the `src/agents` directory. You can copy `research_assistant.py` or `chatbot.py` and modify it to change the agent's behavior and tools.
-1. Import and add your new agent to the `agents` dictionary in `src/agents/agents.py`. Your agent can be called by `/<your_agent_name>/invoke` or `/<your_agent_name>/stream`.
-1. Adjust the Streamlit interface in `src/streamlit_app.py` to match your agent's capabilities.
-
-
-### Handling Private Credential files
-
-If your agents or chosen LLM require file-based credential files or certificates, the `privatecredentials/` has been provided for your development convenience. All contents, excluding the `.gitkeep` files, are ignored by git and docker's build process. See [Working with File-based Credentials](docs/File_Based_Credentials.md) for suggested use.
-
-
-### Docker Setup
-
-This project includes a Docker setup for easy development and deployment. The `compose.yaml` file defines three services: `postgres`, `agent_service` and `streamlit_app`. The `Dockerfile` for each service is in their respective directories.
-
-For local development, we recommend using [docker compose watch](https://docs.docker.com/compose/file-watch/). This feature allows for a smoother development experience by automatically updating your containers when changes are detected in your source code.
-
-1. Make sure you have Docker and Docker Compose (>= [v2.23.0](https://docs.docker.com/compose/release-notes/#2230)) installed on your system.
-
-2. Create a `.env` file from the `.env.example`. At minimum, you need to provide an LLM API key (e.g., OPENAI_API_KEY).
-   ```sh
-   cp .env.example .env
-   # Edit .env to add your API keys
-   ```
-
-3. Build and launch the services in watch mode:
-
-   ```sh
-   docker compose watch
-   ```
-
-   This will automatically:
-   - Start a PostgreSQL database service that the agent service connects to
-   - Start the agent service with FastAPI
-   - Start the Streamlit app for the user interface
-
-4. The services will now automatically update when you make changes to your code:
-   - Changes in the relevant python files and directories will trigger updates for the relevant services.
-   - NOTE: If you make changes to the `pyproject.toml` or `uv.lock` files, you will need to rebuild the services by running `docker compose up --build`.
-
-5. Access the Streamlit app by navigating to `http://localhost:8501` in your web browser.
-
-6. The agent service API will be available at `http://0.0.0.0:8080`. You can also use the OpenAPI docs at `http://0.0.0.0:8080/redoc`.
-
-7. Use `docker compose down` to stop the services.
-
-This setup allows you to develop and test your changes in real-time without manually restarting the services.
-
-### Building other apps on the AgentClient
-
-The repo includes a generic `src/client/client.AgentClient` that can be used to interact with the agent service. This client is designed to be flexible and can be used to build other apps on top of the agent. It supports both synchronous and asynchronous invocations, and streaming and non-streaming requests.
-
-See the `src/run_client.py` file for full examples of how to use the `AgentClient`. A quick example:
-
-```python
-from client import AgentClient
-client = AgentClient()
-
-response = client.invoke("Tell me a brief joke?")
-response.pretty_print()
-# ================================== Ai Message ==================================
-#
-# A man walked into a library and asked the librarian, "Do you have any books on Pavlov's dogs and Schrödinger's cat?"
-# The librarian replied, "It rings a bell, but I'm not sure if it's here or not."
-
+# 启动 FastAPI 服务
+python src/run_service.py
 ```
 
-### Development with LangGraph Studio
+**启动前端服务**（新终端）：
 
-The agent supports [LangGraph Studio](https://langchain-ai.github.io/langgraph/concepts/langgraph_studio/), the IDE for developing agents in LangGraph.
+```bash
+cd frontend
 
-`langgraph-cli[inmem]` is installed with `uv sync`. You can simply add your `.env` file to the root directory as described above, and then launch LangGraph Studio with `langgraph dev`. Customize `langgraph.json` as needed. See the [local quickstart](https://langchain-ai.github.io/langgraph/cloud/how-tos/studio/quick_start/#local-development-server) to learn more.
+# 开发模式启动
+npm run dev
 
-### Local development without Docker
+# 或生产模式
+npm run build
+npm run preview
+```
 
-You can also run the agent service and the Streamlit app locally without Docker, just using a Python virtual environment.
+#### 验证服务状态
 
-1. Create a virtual environment and install dependencies:
+```bash
+# 检查后端健康状态
+curl http://localhost:8080/health
 
-   ```sh
-   uv sync --frozen
-   source .venv/bin/activate
-   ```
+# 检查前端
+# 浏览器访问 http://localhost:8501
+```
 
-2. Run the FastAPI server:
+## 📁 项目结构
 
-   ```sh
-   python src/run_service.py
-   ```
+```
+KnowLedgeLib/
+├── frontend/                 # Vue.js 前端
+│   ├── src/
+│   │   ├── api/            # API 调用封装
+│   │   ├── components/      # Vue 组件
+│   │   ├── pages/          # 页面组件
+│   │   ├── stores/         # Pinia 状态管理
+│   │   └── router/         # 路由配置
+│   └── package.json
+├── src/                    # Python 后端
+│   ├── agents/            # LangGraph Agents
+│   ├── client/            # 客户端封装
+│   ├── core/              # 核心模块（LLM、配置）
+│   ├── service/           # FastAPI 服务
+│   └── run_service.py    # 服务入口
+├── scripts/               # 脚本工具
+│   ├── create_chroma_db.py  # 创建数据库
+│   ├── insert.sql         # SQL 初始化脚本
+│   └── insert.py         # 文档导入脚本
+├── data/                  # 数据目录
+│   ├── AI/              # AI 部门文档
+│   ├── database/         # 数据库部门文档
+│   └── micro_service/    # 微服务部门文档
+├── docs/                  # 文档
+│   ├── 权限控制.md
+│   ├── 数据库设计.md
+│   ├── UI界面.md
+│   └── 接口规定.md
+├── compose.yaml           # Docker Compose 配置
+├── .env.example         # 环境变量示例
+└── pyproject.toml        # Python 项目配置
+```
 
-3. In a separate terminal, run the Streamlit app:
+## 🔐 权限管理说明
 
-   ```sh
-   streamlit run src/streamlit_app.py
-   ```
+系统实现了基于 RBAC 的权限控制，详细说明请参考 [docs/权限控制.md](docs/权限控制.md)。
 
-4. Open your browser and navigate to the URL provided by Streamlit (usually `http://localhost:8501`).
+### 角色定义
 
-## Projects built with or inspired by agent-service-toolkit
+- **管理员 (admin)**: 拥有所有权限，不受部门限制
+- **普通用户 (member)**: 需要通过部门配置访问权限
 
-The following are a few of the public projects that drew code or inspiration from this repo.
+### 部门权限
 
-- **[PolyRAG](https://github.com/QuentinFuxa/PolyRAG)** - Extends agent-service-toolkit with RAG capabilities over both PostgreSQL databases and PDF documents.
-- **[alexrisch/agent-web-kit](https://github.com/alexrisch/agent-web-kit)** - A Next.JS frontend for agent-service-toolkit
-- **[raushan-in/dapa](https://github.com/raushan-in/dapa)** - Digital Arrest Protection App (DAPA) enables users to report financial scams and frauds efficiently via a user-friendly platform.
+每个用户可以配置对不同部门的访问权限：
+- **管理员权限**: 可以查看和编辑该部门的文档
+- **只读权限**: 只能查看该部门的文档
 
-**Please create a pull request editing the README or open a discussion with any new ones to be added!** Would love to include more projects.
+### 权限管理界面
 
-## Contributing
+访问 `http://localhost:8501/permission` 可以管理用户权限。
 
-Contributions are welcome! Please feel free to submit a Pull Request. Currently the tests need to be run using the local development without Docker setup. To run the tests for the agent service:
+## 📝 使用说明
 
-1. Ensure you're in the project root directory and have activated your virtual environment.
+### 用户登录
 
-2. Install the development dependencies and pre-commit hooks:
+1. 访问系统首页
+2. 输入用户名和密码
+3. 首次登录需要注册账号
 
-   ```sh
-   uv sync --frozen
-   pre-commit install
-   ```
+### 知识库问答
 
-3. Run the tests using pytest:
+1. 进入"知识库"页面
+2. 在对话框中输入问题
+3. 系统会检索相关文档并生成回答
+4. 支持多轮对话上下文
 
-   ```sh
-   pytest
-   ```
+### 文件管理
 
-## License
+1. 进入"文件管理"页面
+2. 查看所有可访问的文档
+3. 可以上传、下载、删除文件
+4. 按部门筛选文件
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+### 权限管理（仅管理员）
+
+1. 进入"权限控制"页面
+2. 查看所有用户及其权限
+3. 设置用户为部门管理员
+4. 删除用户
+
+## 🧪 测试
+
+运行测试：
+
+```bash
+# 激活虚拟环境
+source .venv/bin/activate
+
+# 运行所有测试
+pytest
+
+# 运行特定测试
+pytest tests/agents/test_agents.py
+
+# 生成覆盖率报告
+pytest --cov=src --cov-report=html
+```
+
+## 🐳 Docker 开发
+
+使用 Docker Compose 进行开发：
+
+```bash
+# 启动所有服务
+docker compose up
+
+# 查看日志
+docker compose logs -f
+
+# 停止服务
+docker compose down
+
+# 重新构建
+docker compose up --build
+```
+
+## 📖 相关文档
+
+- [权限控制说明](docs/权限控制.md)
+- [数据库设计](docs/数据库设计.md)
+- [UI 界面说明](docs/UI界面.md)
+- [API 接口规定](docs/接口规定.md)
+- [RBAC 数据库迁移说明](docs/RBAC数据库迁移说明.md)
+
+## 🤝 贡献指南
+
+欢迎贡献！请遵循以下步骤：
+
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
+
+## 📄 许可证
+
+本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件。
+
+## 💬 技术支持
+
+如有问题或建议，请：
+- 提交 [Issue](https://github.com/liver0377/KnowLedgeLib/issues)
+- 发送邮件至项目维护者
+
+## 🙏 致谢
+
+感谢以下开源项目：
+
+- [LangGraph](https://github.com/langchain-ai/langgraph)
+- [FastAPI](https://fastapi.tiangolo.com/)
+- [Vue.js](https://vuejs.org/)
+- [Milvus](https://milvus.io/)
+- [ChromaDB](https://www.trychroma.com/)
