@@ -907,6 +907,18 @@ async def list_users(user: dict[str, Any] = Depends(get_user_context)):
     # 转换为API返回格式
     result = []
     for u in users:
+        # 获取用户的部门信息
+        departments = RBACDAO.get_user_departments(u["id"])
+        dept_info = [
+            {
+                "dept_key": d["dept_key"],
+                "dept_name": d["dept_name"],
+                "can_write": d["can_write"],
+                "dept_role": d["dept_role"]
+            }
+            for d in departments
+        ]
+        
         result.append({
             "id": str(u["id"]),
             "name": u.get("display_name") or u["username"],  # 优先使用display_name
@@ -914,6 +926,7 @@ async def list_users(user: dict[str, Any] = Depends(get_user_context)):
             "email": u.get("email"),
             "is_active": u["is_active"],
             "roles": u["roles"],
+            "departments": dept_info,
         })
     return result
 
@@ -1089,6 +1102,45 @@ async def reject_user(
     return {
         "ok": True,
         "message": "User rejected successfully"
+    }
+
+@admin_router.post("/users/{user_id}/departments/{dept_key}/{action}")
+async def update_user_department(
+    user_id: str,
+    dept_key: str,
+    action: str,
+    user: dict[str, Any] = Depends(get_user_context),
+):
+    """
+    更新用户对部门的访问权限
+    
+    支持的action:
+    - set_admin: 设置为部门管理员 (can_write=1, dept_role='editor')
+    - unset_admin: 取消部门管理员 (can_write=0, dept_role='viewer')
+    - set_read: 设置读权限 (can_read=1)
+    - unset_read: 取消读权限 (can_read=0)
+    - set_write: 设置写权限 (can_write=1, dept_role='editor')
+    - unset_write: 取消写权限 (can_write=0, dept_role='viewer')
+    - remove: 完全移除用户对部门的访问权限
+    """
+    require_admin(user)
+    
+    success = RBACDAO.update_user_department(int(user_id), dept_key, action)
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update department access: {action}"
+        )
+    
+    logger.info(f"Department access updated: user_id={user_id}, dept_key={dept_key}, action={action}, operator={user['user_id']}")
+    
+    return {
+        "ok": True,
+        "message": "Department access updated successfully",
+        "user_id": user_id,
+        "dept_key": dept_key,
+        "action": action
     }
 
 @admin_router.post("/departments", response_model=CreateDeptResponse)

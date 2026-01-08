@@ -63,8 +63,18 @@ const activeDoc = ref<KBDoc | null>(null);
 const sidebarLoading = ref(false);
 const showUploadMenu = ref(false);
 
+// 系统管理员：拥有admin角色
 const isAdmin = computed(() => auth.me?.roles?.includes("admin"));
-const canEdit = computed(() => (auth.me?.roles || []).some((r) => ["admin", "editor"].includes(r)));
+
+// 部门管理员：用户所属的部门中至少有一个是editor角色且有写权限
+const isDeptAdmin = computed(() => {
+  const departments = auth.me?.departments || [];
+  return departments.some((d: any) => d.dept_role === "editor" && d.can_write === 1);
+});
+
+// 可以编辑文件：系统管理员或部门管理员
+const canEdit = computed(() => isAdmin.value || isDeptAdmin.value);
+
 const avatarText = computed(() => (auth.displayId ? auth.displayId[0].toUpperCase() : "?"));
 
 const filteredDocs = computed(() =>
@@ -472,8 +482,10 @@ onUnmounted(() => {
         <div class="brand">KnowLedgeLib</div>
 
         <div class="actions">
+          <!-- 只有系统管理员可以看到权限控制和审批列表 -->
           <button v-if="isAdmin" class="btn" @click="goPermission">权限控制</button>
-          <button v-if="isAdmin" class="btn" @click="goFiles">文件管理</button>
+          <!-- 系统管理员和部门管理员都可以看到文件管理 -->
+          <button v-if="canEdit" class="btn" @click="goFiles">文件管理</button>
           <button v-if="isAdmin" class="btn" @click="goApprovals">审批列表</button>
 
           <div class="divider"></div>

@@ -4,7 +4,18 @@ import { useRouter } from "vue-router";
 import { apiFetch } from "@/api/http";
 import { useAuthStore } from "@/stores/auth";
 
-type UserRow = { id: string; name: string; username: string; roles: string[] };
+type UserRow = { 
+  id: string; 
+  name: string; 
+  username: string; 
+  roles: string[];
+  departments: Array<{
+    dept_key: string;
+    dept_name: string;
+    can_write: number;
+    dept_role: string;
+  }>;
+};
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -21,6 +32,42 @@ const avatarText = computed(() => (auth.displayId ? auth.displayId[0].toUpperCas
 const filtered = computed(() =>
   users.value.filter((u) => u.username.toLowerCase().includes(search.value.toLowerCase()))
 );
+
+// 检查用户是否是某个部门的管理员
+function isDeptAdmin(user: UserRow, deptKey: string): boolean {
+  const dept = user.departments?.find(d => d.dept_key === deptKey);
+  return dept?.dept_role === "editor" && dept?.can_write === 1;
+}
+
+async function setDepartmentAdmin(user: UserRow, deptKey: string) {
+  saving.value = user.id;
+  try {
+    // 设置用户为指定部门的管理员
+    await apiFetch(`/admin/users/${user.id}/departments/${deptKey}/set_admin`, {
+      method: "POST",
+    });
+    await loadUsers();
+  } catch (error: any) {
+    alert(error?.message || "设置部门管理员失败");
+  } finally {
+    saving.value = null;
+  }
+}
+
+async function unsetDepartmentAdmin(user: UserRow, deptKey: string) {
+  saving.value = user.id;
+  try {
+    // 取消用户为指定部门的管理员
+    await apiFetch(`/admin/users/${user.id}/departments/${deptKey}/unset_admin`, {
+      method: "POST",
+    });
+    await loadUsers();
+  } catch (error: any) {
+    alert(error?.message || "取消部门管理员失败");
+  } finally {
+    saving.value = null;
+  }
+}
 
 async function loadUsers() {
   loading.value = true;
@@ -164,7 +211,7 @@ onMounted(async () => {
               <div class="header-cell avatar-cell"></div>
               <div class="header-cell name-cell">用户名</div>
               <div class="header-cell username-cell">账号</div>
-              <div class="header-cell permissions-cell">权限</div>
+              <div class="header-cell permissions-cell">所属部门及权限</div>
             </div>
             <div 
               v-for="u in filtered" 
@@ -186,50 +233,38 @@ onMounted(async () => {
                 <div class="user-username">@{{ u.username }}</div>
               </div>
 
-              <div class="cell permissions-cell">
-                <label 
-                  class="permission-label"
-                  :class="{ active: u.roles.includes('admin') }"
-                >
-                  <input 
-                    type="checkbox" 
-                    :checked="u.roles.includes('admin')" 
-                    @change="toggleRole(u, 'admin')"
-                    :disabled="saving === u.id"
-                  />
-                  <span>管理员</span>
-                </label>
-
-                <label 
-                  class="permission-label"
-                  :class="{ active: u.roles.includes('member') }"
-                >
-                  <input 
-                    type="checkbox" 
-                    :checked="u.roles.includes('member')" 
-                    @change="toggleRole(u, 'member')"
-                    :disabled="saving === u.id"
-                  />
-                  <span>普通用户</span>
-                </label>
-
-                <!-- Delete Button -->
-                <button 
-                  class="delete-btn"
-                  @click="openDeleteDialog(u)"
-                  :disabled="deleting === u.id || saving === u.id"
-                  title="删除用户"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="3 6 5 6 21 6"></polyline>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                  </svg>
-                </button>
-
-                <!-- Saving Indicator -->
-                <div v-if="saving === u.id" class="saving-indicator">
-                  <div class="mini-spinner"></div>
+              <!-- 部门权限 -->
+              <div class="cell dept-permissions-cell">
+                <div v-if="u.departments && u.departments.length > 0" class="dept-list">
+                  <div v-for="dept in u.departments" :key="dept.dept_key" class="dept-item">
+                    <span class="dept-name">{{ dept.dept_name || dept.dept_key }}</span>
+                    <span class="dept-role" :class="{ 'editor': dept.dept_role === 'editor' || u.roles.includes('admin') }">
+                      {{ dept.dept_role === 'editor' || u.roles.includes('admin') ? '管理员' : '只读' }}
+                    </span>
+                    <!-- 系统管理员不显示权限设置按钮 -->
+                    <template v-if="!u.roles.includes('admin')">
+                      <button 
+                        v-if="isDeptAdmin(u, dept.dept_key)"
+                        class="dept-action-btn unset-btn"
+                        @click="unsetDepartmentAdmin(u, dept.dept_key)"
+                        :disabled="saving === u.id"
+                        title="取消管理员"
+                      >
+                        ✕
+                      </button>
+                      <button 
+                        v-else
+                        class="dept-action-btn set-btn"
+                        @click="setDepartmentAdmin(u, dept.dept_key)"
+                        :disabled="saving === u.id"
+                        title="设置为管理员"
+                      >
+                        设置成管理员
+                      </button>
+                    </template>
+                  </div>
                 </div>
+                <div v-else class="no-dept">未分配部门</div>
               </div>
             </div>
           </div>
@@ -554,76 +589,89 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
-.permission-label {
-  display: inline-flex;
-  align-items: center;
+/* Department Permissions */
+.dept-permissions-cell {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.dept-list {
+  display: flex;
+  flex-direction: column;
   gap: 6px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  cursor: pointer;
-  font-size: 13px;
-  color: #64748b;
-  transition: all 0.2s;
-  user-select: none;
+  width: 100%;
 }
 
-.permission-label input {
-  display: none;
-}
-
-.permission-label:hover {
-  border-color: #d1d5db;
-  background: #f1f5f9;
-}
-
-.permission-label.active {
-  background: #eef2ff;
-  border-color: #c7d2fe;
-  color: #4f46e5;
-}
-
-.saving-indicator {
+.dept-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  color: #6366f1;
-  font-size: 12px;
-}
-
-.mini-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid #e2e8f0;
-  border-top-color: #6366f1;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-/* Delete Button */
-.delete-btn {
-  width: 32px;
-  height: 32px;
+  gap: 8px;
+  padding: 6px 10px;
   border-radius: 6px;
-  border: 1px solid #fecaca;
-  background: #fef2f2;
-  color: #dc2626;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.dept-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #334155;
+  flex: 1;
+}
+
+.dept-role {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #e2e8f0;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.dept-role.editor {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.dept-action-btn {
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: none;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   transition: all 0.2s;
+  white-space: nowrap;
 }
 
-.delete-btn:hover:not(:disabled) {
+.dept-action-btn.set-btn {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.dept-action-btn.set-btn:hover:not(:disabled) {
+  background: #c7d2fe;
+}
+
+.dept-action-btn.unset-btn {
   background: #fee2e2;
-  border-color: #fca5a5;
+  color: #dc2626;
 }
 
-.delete-btn:disabled {
+.dept-action-btn.unset-btn:hover:not(:disabled) {
+  background: #fecaca;
+}
+
+.dept-action-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.no-dept {
+  font-size: 13px;
+  color: #94a3b8;
+  font-style: italic;
 }
 
 /* Modal */
@@ -761,7 +809,7 @@ onMounted(async () => {
     grid-row: 2;
   }
 
-  .permissions-cell {
+  .dept-permissions-cell {
     grid-column: 1 / -1;
     justify-content: flex-start;
     padding-top: 8px;

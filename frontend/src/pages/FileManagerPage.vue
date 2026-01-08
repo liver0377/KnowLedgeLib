@@ -48,14 +48,51 @@ function stopResize() {
   document.body.style.userSelect = "";
 }
 
-// 检查是否是管理员
+// 系统管理员：拥有admin角色
 const isAdmin = computed(() => auth.me?.roles?.includes("admin"));
+
+// 部门管理员：用户所属的部门中至少有一个是editor角色且有写权限
+const isDeptAdmin = computed(() => {
+  const departments = auth.me?.departments || [];
+  return departments.some((d: any) => d.dept_role === "editor" && d.can_write === 1);
+});
+
+// 用户有写权限的部门列表
+const writableDepartments = computed(() => {
+  const departments = auth.me?.departments || [];
+  return departments
+    .filter((d: any) => d.can_write === 1)
+    .map((d: any) => d.dept_key);
+});
+
+// 用户可访问的部门列表（系统管理员可以访问所有部门）
+const accessibleDepartments = computed(() => {
+  if (isAdmin.value) return null; // null表示不限制
+  
+  const departments = auth.me?.departments || [];
+  return departments.map((d: any) => d.dept_key);
+});
+
+// 判断用户对指定部门是否有写权限
+function canWriteDept(deptKey: string): boolean {
+  if (isAdmin.value) return true;
+  return writableDepartments.value.includes(deptKey);
+}
+
+// 判断用户对指定部门是否可访问
+function canAccessDept(deptKey: string): boolean {
+  if (isAdmin.value) return true;
+  return accessibleDepartments.value?.includes(deptKey) || false;
+}
 
 // 按部门分组文件
 const groupedFiles = computed(() => {
   const groups: Record<string, KBDoc[]> = {};
   
   files.value.forEach(file => {
+    // 只显示用户可访问的部门
+    if (!canAccessDept(file.dept_key)) return;
+    
     if (!groups[file.dept_key]) {
       groups[file.dept_key] = [];
     }
@@ -258,7 +295,7 @@ onUnmounted(() => {
           <div class="file-header">
             <h2 class="dept-title">{{ selectedDept }}</h2>
             <div class="file-actions">
-              <button v-if="isAdmin" class="btn btn-primary" @click="showUploadDialog(selectedDept)">
+              <button v-if="canWriteDept(selectedDept)" class="btn btn-primary" @click="showUploadDialog(selectedDept)">
                 + 上传文件
               </button>
             </div>
@@ -307,7 +344,7 @@ onUnmounted(() => {
               <div class="cell file-buttons">
                 <button class="btn-icon" @click="downloadFile(file)" title="下载">⬇️</button>
                 <button
-                  v-if="isAdmin"
+                  v-if="canWriteDept(file.dept_key)"
                   class="btn-icon btn-danger"
                   @click="deleteFile(file)"
                   title="删除"

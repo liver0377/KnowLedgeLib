@@ -94,7 +94,7 @@ class RBACDAO:
         with get_db_connection() as conn:
             with conn.cursor(DictCursor) as cursor:
                 cursor.execute("""
-                    SELECT d.dept_key, d.name as dept_name, ud.can_read, ud.can_write
+                    SELECT d.dept_key, d.name as dept_name, ud.can_read, ud.can_write, ud.dept_role
                     FROM user_departments ud
                     JOIN departments d ON ud.department_id = d.id
                     WHERE ud.user_id = %s AND d.is_active = 1
@@ -402,4 +402,149 @@ class RBACDAO:
             except Exception as e:
                 conn.rollback()
                 logger.error(f"Failed to reject user: {e}")
+                return False
+
+    @staticmethod
+    def update_user_department(
+        user_id: int, 
+        dept_key: str,
+        action: str,
+        can_read: bool | None = None,
+        can_write: bool | None = None,
+        dept_role: str | None = None
+    ) -> bool:
+        """
+        统一的用户部门权限更新方法
+        
+        参数:
+            user_id: 用户ID
+            dept_key: 部门标识
+            action: 操作类型
+                - "set_admin": 设置为部门管理员 (can_write=1, dept_role='editor')
+                - "unset_admin": 取消部门管理员 (can_write=0, dept_role='viewer')
+                - "set_read": 设置读权限 (can_read=1)
+                - "unset_read": 取消读权限 (can_read=0)
+                - "set_write": 设置写权限 (can_write=1, dept_role='editor')
+                - "unset_write": 取消写权限 (can_write=0, dept_role='viewer')
+                - "remove": 完全移除用户对部门的访问权限
+            can_read: 读权限（仅当action="custom"时使用）
+            can_write: 写权限（仅当action="custom"时使用）
+            dept_role: 部门角色（仅当action="custom"时使用）
+        
+        如果用户不在该部门，会自动添加（action="remove"除外）
+        """
+        with get_db_connection() as conn:
+            try:
+                with conn.cursor() as cursor:
+                    # 获取部门ID
+                    cursor.execute("""
+                        SELECT id FROM departments WHERE dept_key = %s AND is_active = 1
+                    """, (dept_key,))
+                    dept = cursor.fetchone()
+                    
+                    if not dept:
+                        logger.error(f"Department not found: {dept_key}")
+                        return False
+                    
+                    dept_id = dept[0]
+                    
+                    # 处理remove操作
+                    if action == "remove":
+                        cursor.execute("""
+                            DELETE FROM user_departments 
+                            WHERE user_id = %s AND department_id = %s
+                        """, (user_id, dept_id))
+                        conn.commit()
+                        logger.info(f"Removed department access: user_id={user_id}, dept_key={dept_key}")
+                        return True
+                    
+                    # 检查用户是否已在该部门
+                    cursor.execute("""
+                        SELECT id, can_read, can_write, dept_role FROM user_departments 
+                        WHERE user_id = %s AND department_id = %s
+                    """, (user_id, dept_id))
+                    existing = cursor.fetchone()
+                    
+                    # 根据action确定要更新的字段
+                    if action == "set_admin":
+                        new_can_write = True
+                        new_dept_role = "editor"
+                        new_can_read = None  # 不修改读权限
+                    elif action == "unset_admin":
+                        new_can_write = False
+                        new_dept_role = "viewer"
+                        new_can_read = None  # 不修改读权限
+                    elif action == "set_read":
+                        new_can_read = True
+                        new_can_write = None
+                        new_dept_role = None
+                    elif action == "unset_read":
+                        new_can_read = False
+                        new_can_write = None
+                        new_dept_role = None
+                    elif action == "set_write":
+                        new_can_write = True
+                        new_dept_role = "editor"
+                        new_can_read = None
+                    elif action == "unset_write":
+                        new_can_write = False
+                        new_dept_role = "viewer"
+                        new_can_read = None
+                    elif action == "custom":
+                        # 使用自定义参数
+                        new_can_read = can_read
+                        new_can_write = can_write
+                        new_dept_role = dept_role
+                    else:
+                        logger.error(f"Invalid action: {action}")
+                        return False
+                    
+                    # 构建更新语句
+                    updates = []
+                    values = []
+                    
+                    if new_can_read is not None:
+                        updates.append("can_read = %s")
+                        values.append(1 if new_can_read else 0)
+                    
+                    if new_can_write is not None:
+                        updates.append("can_write = %s")
+                        values.append(1 if new_can_write else 0)
+                    
+                    if new_dept_role is not None:
+                        updates.append("dept_role = %s")
+                        values.append(new_dept_role)
+                    
+                    if not updates:
+                        logger.warning(f"No updates specified for user_id={user_id}, dept_key={dept_key}")
+                        return True
+                    
+                    if existing:
+                        # 更新现有记录
+                        values.extend([user_id, dept_id])
+                        sql = f"""
+                            UPDATE user_departments 
+                            SET {', '.join(updates)}, updated_at = NOW()
+                            WHERE user_id = %s AND department_id = %s
+                        """
+                        cursor.execute(sql, values)
+                    else:
+                        # 插入新记录（除了remove操作）
+                        # 默认值
+                        final_can_read = new_can_read if new_can_read is not None else True
+                        final_can_write = new_can_write if new_can_write is not None else False
+                        final_dept_role = new_dept_role if new_dept_role is not None else 'viewer'
+                        
+                        cursor.execute("""
+                            INSERT INTO user_departments (user_id, department_id, can_read, can_write, dept_role)
+                            VALUES (%s, %s, %s, %s, %s)
+                        """, (user_id, dept_id, 1 if final_can_read else 0, 
+                               1 if final_can_write else 0, final_dept_role))
+                    
+                    conn.commit()
+                    logger.info(f"Updated department access: user_id={user_id}, dept_key={dept_key}, action={action}")
+                    return True
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"Failed to update department access: {e}")
                 return False
