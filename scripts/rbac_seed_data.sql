@@ -30,6 +30,7 @@ INSERT INTO permissions (perm_key, name, description, resource, action, is_syste
 ('kb:file:detail',    '知识库文件详情',   '查看知识库文件详情',          'kb',    'detail',   1),
 ('kb:file:download',  '知识库文件下载',   '下载知识库文件',              'kb',    'download', 1),
 ('kb:file:upload',    '知识库文件上传',   '上传/编辑知识库文件',         'kb',    'upload',   1),
+('kb:file:delete',    '知识库文件删除',   '删除知识库文件',              'kb',    'delete',   1),
 -- 管理员权限
 ('admin:user:list',   '用户列表',         '列出所有用户',                'admin', 'list',     1),
 ('admin:user:update', '用户更新',         '更新用户信息',                'admin', 'update',   1)
@@ -53,7 +54,7 @@ FROM roles r
 CROSS JOIN permissions p
 WHERE r.role_key = 'admin'
   AND p.perm_key IN (
-      'kb:file:list', 'kb:file:detail', 'kb:file:download', 'kb:file:upload',
+      'kb:file:list', 'kb:file:detail', 'kb:file:download', 'kb:file:upload', 'kb:file:delete',
       'admin:user:list', 'admin:user:update'
   )
 ON DUPLICATE KEY UPDATE role_id = role_id;
@@ -65,7 +66,7 @@ FROM roles r
 CROSS JOIN permissions p
 WHERE r.role_key = 'editor'
   AND p.perm_key IN (
-      'kb:file:list', 'kb:file:detail', 'kb:file:download', 'kb:file:upload'
+      'kb:file:list', 'kb:file:detail', 'kb:file:download', 'kb:file:upload', 'kb:file:delete'
   )
 ON DUPLICATE KEY UPDATE role_id = role_id;
 
@@ -103,9 +104,9 @@ ON DUPLICATE KEY UPDATE
 -- 示例密码 "password123" 的 bcrypt 哈希 (cost=12)
 
 INSERT INTO users (username, password_hash, display_name, email, is_active) VALUES
-('user-ryan',    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.uQxB3z3E8TBZOe', 'Ryan (管理员)',   'ryan@example.com',   1),
-('user-editor',  '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.uQxB3z3E8TBZOe', '编辑者用户',      'editor@example.com', 1),
-('user-viewer',  '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.uQxB3z3E8TBZOe', '查看者用户',      'viewer@example.com', 1)
+('user-ryan',    '$2b$12$Mce8BpiT087DAw/p/FhHq.D5Bs4wPH128Y5S9drsIJl67tr', 'Ryan (管理员)',   'ryan@example.com',   1),
+('user-editor',  '$2b$12$Mce8BpiT087DAw/p/FhHq.D5Bs4wPH128Y5S9drsIJl67tr', '编辑者用户',      'editor@example.com', 1),
+('user-viewer',  '$2b$12$Mce8BpiT087DAw/p/FhHq.D5Bs4wPH128Y5S9drsIJl67tr', '查看者用户',      'viewer@example.com', 1)
 ON DUPLICATE KEY UPDATE 
     display_name = VALUES(display_name),
     email = VALUES(email);

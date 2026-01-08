@@ -8,7 +8,6 @@ from langchain_core.runnables import RunnableConfig, RunnableSerializable, Runna
 from agents.knowledge_base_agent.retrievers import make_retriever
 from agents.knowledge_base_agent.state import AgentState
 from agents.knowledge_base_agent.prompts import DOC_SYSTEM_PROMPT
-from agents.knowledge_base_agent.authz import get_allowed_dept_keys
 from core import get_model, settings
 
 logger = logging.getLogger(__name__)

@@ -80,6 +80,41 @@ class LoginInput(BaseModel):
     username: str
     password: str
 
+class RegisterInput(BaseModel):
+    """用户注册时的输入"""
+    username: str = Field(description="用户名（唯一）", examples=["user-new"])
+    password: str = Field(description="密码", examples=["123456"])
+    display_name: str = Field(description="显示名称", examples=["新用户"])
+    email: str | None = Field(default=None, description="邮箱地址", examples=["user@example.com"])
+    dept_id: int | None = Field(default=None, description="申请的部门ID", examples=[1])
+    reason: str | None = Field(default=None, description="申请理由", examples=["需要访问该部门的知识库"])
+
+class PendingUserItem(BaseModel):
+    """待审批用户项"""
+    id: int
+    username: str
+    display_name: str
+    email: str | None
+    requested_dept_id: int | None
+    dept_name: str | None = None
+    dept_key: str | None = None
+    reason: str | None
+    status: str
+    created_at: str
+
+class PendingUsersResponse(BaseModel):
+    """待审批用户列表响应"""
+    items: list[PendingUserItem]
+
+class ApproveUserInput(BaseModel):
+    """审批用户输入"""
+    dept_id: int = Field(description="分配的部门ID", examples=[1])
+    comment: str | None = Field(default=None, description="审批意见", examples=["同意申请"])
+
+class RejectUserInput(BaseModel):
+    """驳回用户输入"""
+    comment: str | None = Field(default=None, description="驳回理由", examples=["部门不合适"])
+
 class ToolCall(TypedDict):
     """Represents a request to call a tool."""
 
@@ -211,3 +246,31 @@ class UpdatePermissionsInput(BaseModel):
         description="用户角色列表",
         examples=[["viewer"], ["editor"], ["admin"]],
     )
+
+class UploadFileResponse(BaseModel):
+    """上传文件响应"""
+    ok: bool
+    file_id: str
+    name: str
+    dept_key: str
+    size_bytes: int
+    message: str = "File uploaded successfully"
+
+class CreateDeptInput(BaseModel):
+    """创建部门请求体"""
+    dept_key: str = Field(
+        description="部门标识（英文，用于文件存储）",
+        examples=["security", "hr", "it"],
+    )
+    name: str = Field(
+        description="部门名称（中文，用于显示）",
+        examples=["安全部", "人力资源部", "信息技术部"],
+    )
+
+class CreateDeptResponse(BaseModel):
+    """创建部门响应"""
+    ok: bool
+    dept_id: int
+    dept_key: str
+    name: str
+    message: str = "Department created successfully"

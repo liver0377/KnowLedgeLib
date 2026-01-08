@@ -9,11 +9,19 @@ from schema.schema import (
     ServiceMetadata,
     StreamInput,
     UserInput,
-    LoginInput, 
+    LoginInput,
+    RegisterInput,
+    PendingUserItem,
+    PendingUsersResponse,
+    ApproveUserInput,
+    RejectUserInput,
     KBFileItem,
     KBFilesResponse,
     KBFileDetail,
     UpdatePermissionsInput,
+    UploadFileResponse,
+    CreateDeptInput,
+    CreateDeptResponse
 )
 
 __all__ = [
@@ -24,6 +32,11 @@ __all__ = [
     "ServiceMetadata",
     "StreamInput",
     "LoginInput",
+    "RegisterInput",
+    "PendingUserItem",
+    "PendingUsersResponse",
+    "ApproveUserInput",
+    "RejectUserInput",
     "Feedback",
     "FeedbackResponse",
     "ChatHistoryInput",
@@ -32,4 +45,7 @@ __all__ = [
     "KBFilesResponse",
     "KBFileDetail",
     "UpdatePermissionsInput",
+    "UploadFileResponse",
+    "CreateDeptInput",
+    "CreateDeptResponse"
 ]

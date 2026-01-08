@@ -72,5 +72,24 @@ export const useAuthStore = defineStore("auth", {
         this.loading = false;
       }
     },
+
+    async register(username: string, password: string, displayName: string, email?: string) {
+      this.loading = true;
+      this.error = "";
+      try {
+        await apiFetch("/auth/register", {
+          method: "POST",
+          body: JSON.stringify({ username, password, display_name: displayName, email }),
+        });
+        // 注册成功后立刻拉一次 /auth/me 确认登录态
+        await this.refreshMe(true);
+        if (!this.me) throw new Error("Registration succeeded but /auth/me returned empty");
+      } catch (e: any) {
+        this.error = e?.message || String(e);
+        throw e;
+      } finally {
+        this.loading = false;
+      }
+    },
   },
 });

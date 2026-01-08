@@ -13,6 +13,8 @@ const search = ref("");
 const users = ref<UserRow[]>([]);
 const loading = ref(false);
 const saving = ref<string | null>(null);
+const deleting = ref<string | null>(null);
+const showDeleteDialog = ref<UserRow | null>(null);
 
 const avatarText = computed(() => (auth.displayId ? auth.displayId[0].toUpperCase() : "?"));
 
@@ -41,6 +43,33 @@ async function toggleRole(user: UserRow, role: "viewer" | "editor") {
   });
   await loadUsers();
   saving.value = null;
+}
+
+function openDeleteDialog(user: UserRow) {
+  showDeleteDialog.value = user;
+}
+
+function closeDeleteDialog() {
+  showDeleteDialog.value = null;
+}
+
+async function confirmDeleteUser() {
+  if (!showDeleteDialog.value) return;
+
+  const user = showDeleteDialog.value;
+  deleting.value = user.id;
+
+  try {
+    await apiFetch(`/admin/users/${user.id}`, {
+      method: "DELETE",
+    });
+    await loadUsers();
+    closeDeleteDialog();
+  } catch (e: any) {
+    alert(e?.message || "删除用户失败");
+  } finally {
+    deleting.value = null;
+  }
 }
 
 function goBack() {
@@ -122,26 +151,37 @@ onMounted(async () => {
             <p>没有找到匹配的用户</p>
           </div>
 
-          <!-- User Cards -->
-          <div v-else class="user-grid">
+          <!-- User List -->
+          <div v-else class="user-list">
+            <div class="list-header">
+              <div class="header-cell avatar-cell"></div>
+              <div class="header-cell name-cell">用户名</div>
+              <div class="header-cell username-cell">账号</div>
+              <div class="header-cell permissions-cell">权限</div>
+            </div>
             <div 
               v-for="u in filtered" 
               :key="u.id" 
-              class="user-card"
+              class="user-row"
               :class="{ 'saving': saving === u.id }"
             >
-              <div class="user-avatar">
-                {{ u.name ? u.name[0].toUpperCase() : u.username[0].toUpperCase() }}
+              <div class="cell avatar-cell">
+                <div class="user-avatar-small">
+                  {{ u.name ? u.name[0].toUpperCase() : u.username[0].toUpperCase() }}
+                </div>
               </div>
               
-              <div class="user-info">
+              <div class="cell name-cell">
                 <div class="user-name">{{ u.name || '未设置姓名' }}</div>
+              </div>
+              
+              <div class="cell username-cell">
                 <div class="user-username">@{{ u.username }}</div>
               </div>
 
-              <div class="permissions">
+              <div class="cell permissions-cell">
                 <label 
-                  class="permission-tag"
+                  class="permission-label"
                   :class="{ active: u.roles.includes('viewer') }"
                 >
                   <input 
@@ -150,15 +190,11 @@ onMounted(async () => {
                     @change="toggleRole(u, 'viewer')"
                     :disabled="saving === u.id"
                   />
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                    <circle cx="12" cy="12" r="3"/>
-                  </svg>
                   <span>查看</span>
                 </label>
 
                 <label 
-                  class="permission-tag"
+                  class="permission-label"
                   :class="{ active: u.roles.includes('editor') }"
                 >
                   <input 
@@ -167,19 +203,57 @@ onMounted(async () => {
                     @change="toggleRole(u, 'editor')"
                     :disabled="saving === u.id"
                   />
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                  </svg>
                   <span>编辑</span>
                 </label>
-              </div>
 
-              <!-- Saving Indicator -->
-              <div v-if="saving === u.id" class="saving-indicator">
-                <div class="mini-spinner"></div>
+                <!-- Delete Button -->
+                <button 
+                  class="delete-btn"
+                  @click="openDeleteDialog(u)"
+                  :disabled="deleting === u.id || saving === u.id"
+                  title="删除用户"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  </svg>
+                </button>
+
+                <!-- Saving Indicator -->
+                <div v-if="saving === u.id" class="saving-indicator">
+                  <div class="mini-spinner"></div>
+                </div>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Delete Confirmation Dialog -->
+      <div v-if="showDeleteDialog" class="modal-overlay" @click="closeDeleteDialog">
+        <div class="modal-content" @click.stop>
+          <div class="modal-header">
+            <h3>确认删除用户</h3>
+          </div>
+          <div class="modal-body">
+            <p>确定要删除用户 <strong>{{ showDeleteDialog.name || showDeleteDialog.username }}</strong> 吗？</p>
+            <p class="warning-text">此操作不可撤销，该用户的所有数据和权限将被永久删除。</p>
+          </div>
+          <div class="modal-footer">
+            <button 
+              class="btn-secondary" 
+              @click="closeDeleteDialog"
+              :disabled="deleting === showDeleteDialog.id"
+            >
+              取消
+            </button>
+            <button 
+              class="btn-danger" 
+              @click="confirmDeleteUser"
+              :disabled="deleting === showDeleteDialog.id"
+            >
+              {{ deleting === showDeleteDialog.id ? '删除中...' : '确认删除' }}
+            </button>
           </div>
         </div>
       </div>
@@ -381,60 +455,78 @@ onMounted(async () => {
   font-size: 15px;
 }
 
-/* User Grid */
-.user-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 16px;
-}
-
-/* User Card */
-.user-card {
-  position: relative;
+/* User List */
+.user-list {
   background: #fff;
   border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  padding: 20px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.list-header {
+  display: grid;
+  grid-template-columns: 60px 200px 200px 1fr;
+  gap: 16px;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.header-cell {
   display: flex;
   align-items: center;
+}
+
+.user-row {
+  display: grid;
+  grid-template-columns: 60px 200px 200px 1fr;
   gap: 16px;
-  transition: all 0.2s;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  align-items: center;
+  transition: background 0.2s;
+  position: relative;
 }
 
-.user-card:hover {
-  border-color: #d1d5db;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+.user-row:hover {
+  background: #f8fafc;
 }
 
-.user-card.saving {
+.user-row:last-child {
+  border-bottom: none;
+}
+
+.user-row.saving {
   opacity: 0.7;
   pointer-events: none;
 }
 
-.user-avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
+.cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.user-avatar-small {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
   background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
-  font-size: 18px;
-  flex-shrink: 0;
-}
-
-.user-info {
-  flex: 1;
-  min-width: 0;
+  font-size: 14px;
 }
 
 .user-name {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 14px;
   color: #0f172a;
-  margin-bottom: 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -448,19 +540,19 @@ onMounted(async () => {
   text-overflow: ellipsis;
 }
 
-/* Permissions */
-.permissions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.permission-tag {
+.permissions-cell {
   display: flex;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.permission-label {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  padding: 8px 12px;
-  border-radius: 10px;
+  padding: 6px 12px;
+  border-radius: 8px;
   border: 1px solid #e2e8f0;
   background: #f8fafc;
   cursor: pointer;
@@ -470,39 +562,157 @@ onMounted(async () => {
   user-select: none;
 }
 
-.permission-tag input {
+.permission-label input {
   display: none;
 }
 
-.permission-tag:hover {
+.permission-label:hover {
   border-color: #d1d5db;
   background: #f1f5f9;
 }
 
-.permission-tag.active {
+.permission-label.active {
   background: #eef2ff;
   border-color: #c7d2fe;
   color: #4f46e5;
 }
 
-.permission-tag.active svg {
-  color: #6366f1;
-}
-
-/* Saving Indicator */
 .saving-indicator {
-  position: absolute;
-  top: 12px;
-  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #6366f1;
+  font-size: 12px;
 }
 
 .mini-spinner {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border: 2px solid #e2e8f0;
   border-top-color: #6366f1;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+/* Delete Button */
+.delete-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #dc2626;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.delete-btn:hover:not(:disabled) {
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+
+.delete-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+.modal-header {
+  margin-bottom: 20px;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.modal-body {
+  margin-bottom: 24px;
+  color: #4b5563;
+  line-height: 1.6;
+}
+
+.modal-body strong {
+  color: #1f2937;
+}
+
+.warning-text {
+  color: #dc2626;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.btn-secondary {
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #f9fafb;
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-danger {
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: none;
+  background: #dc2626;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Responsive */
@@ -524,20 +734,31 @@ onMounted(async () => {
     text-align: center;
   }
 
-  .user-grid {
-    grid-template-columns: 1fr;
+  .list-header {
+    display: none;
   }
 
-  .user-card {
-    flex-wrap: wrap;
+  .user-row {
+    grid-template-columns: 60px 1fr;
+    grid-template-rows: auto auto;
+    gap: 8px 12px;
   }
 
-  .permissions {
-    width: 100%;
-    margin-top: 8px;
-    padding-top: 12px;
+  .name-cell {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .username-cell {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .permissions-cell {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    padding-top: 8px;
     border-top: 1px solid #f1f5f9;
-    justify-content: flex-end;
   }
 }
 </style>

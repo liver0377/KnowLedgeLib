@@ -155,6 +155,14 @@ function goPermission() {
   router.push("/permissions");
 }
 
+function goFiles() {
+  router.push("/files");
+}
+
+function goApprovals() {
+  router.push("/approvals");
+}
+
 /** ===== Chat State ===== */
 const messages = ref<UiMessage[]>([]);
 const input = ref("");
@@ -465,16 +473,8 @@ onUnmounted(() => {
 
         <div class="actions">
           <button v-if="isAdmin" class="btn" @click="goPermission">权限控制</button>
-
-          <div v-if="canEdit" class="upload">
-            <button class="btn" @click="showUploadMenu = !showUploadMenu">+</button>
-            <div v-if="showUploadMenu" class="menu">
-              <label class="upload-label">
-                上传 PDF
-                <input type="file" accept="application/pdf" @change="onUploadPdf" />
-              </label>
-            </div>
-          </div>
+          <button v-if="isAdmin" class="btn" @click="goFiles">文件管理</button>
+          <button v-if="isAdmin" class="btn" @click="goApprovals">审批列表</button>
 
           <div class="divider"></div>
 

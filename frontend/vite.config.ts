@@ -20,6 +20,7 @@ export default defineConfig({
       "/health": "http://localhost:8080",
       "/kb": "http://localhost:8080",
       "/admin": "http://localhost:8080",
+      "/departments": "http://localhost:8080", // ✅ 加这一行
     },
   },
 });

@@ -144,6 +144,14 @@ class Settings(BaseSettings):
     MONGO_PASSWORD: SecretStr | None = None
     MONGO_AUTH_SOURCE: str | None = None
 
+    # MySQL Configuration for RBAC
+    MYSQL_HOST: str | None = None
+    MYSQL_PORT: int | None = None
+    MYSQL_USER: str | None = None
+    MYSQL_PASSWORD: SecretStr | None = None
+    MYSQL_DB: str = "knowledge_lib"
+    MYSQL_CHARSET: str = "utf8mb4"
+
     # Azure OpenAI Settings
     AZURE_OPENAI_API_KEY: SecretStr | None = None
     AZURE_OPENAI_ENDPOINT: str | None = None

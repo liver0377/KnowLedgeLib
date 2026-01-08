@@ -7,7 +7,7 @@ const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 
-const username = ref("ryan");
+const username = ref("user-ryan");
 const password = ref("123456");
 const localError = ref("");
 
@@ -58,7 +58,12 @@ async function onSubmit() {
         </p>
 
         <p style="font-size:12px; color:#6b7280; margin-top: 12px;">
-          Demo: ryan/123456 or viewer/123456
+          Demo: user-ryan/123456 or user-viewer/123456
+        </p>
+
+        <p style="font-size:12px; color:#6b7280; margin-top: 8px;">
+          Don't have an account? 
+          <router-link to="/register" style="color:#111827; text-decoration:underline;">Sign up</router-link>
         </p>
       </div>
     </div>
