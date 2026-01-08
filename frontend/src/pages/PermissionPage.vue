@@ -31,12 +31,19 @@ async function loadUsers() {
   }
 }
 
-async function toggleRole(user: UserRow, role: "viewer" | "editor") {
+async function toggleRole(user: UserRow, role: "admin" | "member") {
   saving.value = user.id;
-  // 支持多选：添加或移除单个角色，不影响其他角色
+  // 切换用户的全局角色（admin 或 member）
+  // 注意：editor 和 viewer 不再是全局角色，而是部门级别权限
   const nextRoles = user.roles.includes(role)
     ? user.roles.filter((r) => r !== role)  // 移除该角色
     : [...user.roles, role];  // 添加该角色
+  
+  // 确保用户至少有一个角色（至少是 member）
+  if (nextRoles.length === 0) {
+    nextRoles.push("member");
+  }
+  
   await apiFetch(`/admin/users/${user.id}/permissions`, {
     method: "POST",
     body: JSON.stringify({ roles: nextRoles }),
@@ -182,28 +189,28 @@ onMounted(async () => {
               <div class="cell permissions-cell">
                 <label 
                   class="permission-label"
-                  :class="{ active: u.roles.includes('viewer') }"
+                  :class="{ active: u.roles.includes('admin') }"
                 >
                   <input 
                     type="checkbox" 
-                    :checked="u.roles.includes('viewer')" 
-                    @change="toggleRole(u, 'viewer')"
+                    :checked="u.roles.includes('admin')" 
+                    @change="toggleRole(u, 'admin')"
                     :disabled="saving === u.id"
                   />
-                  <span>查看</span>
+                  <span>管理员</span>
                 </label>
 
                 <label 
                   class="permission-label"
-                  :class="{ active: u.roles.includes('editor') }"
+                  :class="{ active: u.roles.includes('member') }"
                 >
                   <input 
                     type="checkbox" 
-                    :checked="u.roles.includes('editor')" 
-                    @change="toggleRole(u, 'editor')"
+                    :checked="u.roles.includes('member')" 
+                    @change="toggleRole(u, 'member')"
                     :disabled="saving === u.id"
                   />
-                  <span>编辑</span>
+                  <span>普通用户</span>
                 </label>
 
                 <!-- Delete Button -->

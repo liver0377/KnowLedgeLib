@@ -1,10 +1,12 @@
--- ============================================================================
+-- =============================================================================
 -- RBAC + ABAC 权限管理数据库 Schema (MySQL)
 -- 
 -- 设计说明:
 -- - RBAC: 基于角色的访问控制 (Role-Based Access Control)
 -- - ABAC: 基于部门属性的访问控制 (Attribute-Based Access Control)
--- ============================================================================
+-- - 全局角色只有两种: admin 和 member（普通用户）
+-- - 部门权限通过 user_departments 表的 can_read 和 can_write 控制
+-- =============================================================================
 
 -- 如果数据库不存在则创建
 CREATE DATABASE IF NOT EXISTS knowledge_lib DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -32,11 +34,11 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- ============================================================================
 -- 2. 角色表 (roles)
--- 存储系统角色定义
+-- 存储系统角色定义，全局角色只有 admin 和 member
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS roles (
     id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    role_key        VARCHAR(32)     NOT NULL UNIQUE COMMENT '角色标识: admin, editor, viewer',
+    role_key        VARCHAR(32)     NOT NULL UNIQUE COMMENT '角色标识: admin, member',
     name            VARCHAR(64)     NOT NULL COMMENT '角色名称',
     description     VARCHAR(255)    DEFAULT NULL COMMENT '角色描述',
     priority        INT             NOT NULL DEFAULT 0 COMMENT '优先级，数字越大优先级越高',
@@ -128,7 +130,9 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 -- ============================================================================
 -- 7. 用户-部门关联表 (user_departments)
 -- 实现用户可访问部门的多对多关系 (ABAC 核心)
--- 支持细粒度的读/写权限控制
+-- 支持细粒度的读/写权限控制，editor/viewer 在这里体现：
+-- - editor: can_read=1, can_write=1
+-- - viewer: can_read=1, can_write=0
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS user_departments (
     id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

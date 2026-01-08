@@ -22,10 +22,9 @@ logger = __import__('logging').getLogger(__name__)
 # 角色常量（这些常量用于JWT验证，需要保留）
 # ==============================
 ROLE_ADMIN = "admin"
-ROLE_EDITOR = "editor"
-ROLE_VIEWER = "viewer"
+ROLE_MEMBER = "member"
 
-ALL_ROLES = {ROLE_ADMIN, ROLE_EDITOR, ROLE_VIEWER}
+ALL_ROLES = {ROLE_ADMIN, ROLE_MEMBER}
 
 
 # ==============================
@@ -170,7 +169,7 @@ def jwt_secret() -> str:
 def create_access_token(*, sub: str, roles: list[str]) -> str:
     """
     生成 JWT (AuthN)
-    roles：只允许 viewer/editor/admin，其他一律过滤掉，避免脏数据/越权注入
+    roles：只允许 member/admin，其他一律过滤掉，避免脏数据/越权注入
     """
     now = int(time.time())
     clean_roles = [r for r in (roles or []) if r in ALL_ROLES]
@@ -201,7 +200,7 @@ def get_current_user(request: Request) -> dict[str, Any]:
     if not sub:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
 
-    # roles 清洗：只保留三种标准角色
+    # roles 清洗：只保留标准角色
     if not isinstance(roles, list):
         roles = []
     roles = [r for r in roles if isinstance(r, str) and r in ALL_ROLES]
@@ -262,42 +261,41 @@ def require_admin(user: dict[str, Any]) -> None:
 def can_access_dept(user: dict[str, Any], dept_key: str) -> bool:
     """
     Dept Scope（读权限）：list/detail/download/search 统一使用
-    从数据库查询用户可访问的部门
+    从数据库查询用户可访问的部门，检查 can_read 字段
     """
     # admin不受部门限制
     if has_role(user, ROLE_ADMIN):
         return True
     
-    allowed = set(user.get("allowed_dept_keys", []))
-    return dept_key in allowed
+    # 检查用户是否对该部门有读权限
+    try:
+        dept_access = RBACDAO.get_user_departments(int(user["user_id"]))
+        for dept in dept_access:
+            if dept['dept_key'] == dept_key and dept['can_read']:
+                return True
+    except Exception as e:
+        logger.error(f"Failed to check department read permission: {e}")
+    return False
 
 
-def can_upload_dept(user: dict[str, Any], dept_key: str) -> bool:
+def can_write_dept(user: dict[str, Any], dept_key: str) -> bool:
     """
-    Dept Scope（写权限）：upload/edit 统一使用
-    从数据库查询用户的部门写权限
+    Dept Scope（写权限）：upload/edit/delete 统一使用
+    从数据库查询用户的部门写权限，检查 can_write 字段
     - admin：任意 dept
-    - editor：仅 allowed_dept_keys 内且有写权限
-    - viewer：不允许（但这个一般由权限检查拦住）
+    - member：仅对有写权限的部门（can_write=1）
     """
     if has_role(user, ROLE_ADMIN):
         return True
     
-    if has_role(user, ROLE_EDITOR):
-        allowed = set(user.get("allowed_dept_keys", []))
-        if dept_key not in allowed:
-            return False
-        
-        # 检查是否有写权限（需要重新查询数据库获取详细的can_write信息）
-        try:
-            dept_access = RBACDAO.get_user_departments(int(user["user_id"]))
-            for dept in dept_access:
-                if dept['dept_key'] == dept_key and dept['can_write']:
-                    return True
-        except Exception as e:
-            logger.error(f"Failed to check department write permission: {e}")
-        return False
-    
+    # 检查用户是否对该部门有写权限
+    try:
+        dept_access = RBACDAO.get_user_departments(int(user["user_id"]))
+        for dept in dept_access:
+            if dept['dept_key'] == dept_key and dept['can_write']:
+                return True
+    except Exception as e:
+        logger.error(f"Failed to check department write permission: {e}")
     return False
 
 

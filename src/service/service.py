@@ -63,7 +63,7 @@ from service.auth import (
     get_user_context,
     require_admin,
     can_access_dept,
-    can_upload_dept,
+    can_write_dept,
     permission_manager,
 )
 from service.db import RBACDAO
@@ -280,7 +280,7 @@ def _make_file_id(dept_key: str, filename: str) -> str:
 def _can_edit_file(user: dict[str, Any], dept_key: str) -> bool:
     if not permission_manager.has_permission(user, "kb", "file:upload"):
         return False
-    return can_upload_dept(user, dept_key)
+    return can_write_dept(user, dept_key)
 
 def _find_visible_pdf_by_id(root: Path, user: dict[str, Any], file_id: str) -> Optional[Tuple[Path, str, str]]:
     # returns (path, dept_key, filename) or None
@@ -493,7 +493,7 @@ async def upload_kb_file(
     permission_manager.require_permission(user, "kb", "file:upload")
     
     # 2. 验证部门访问权限
-    if not can_upload_dept(user, dept_key):
+    if not can_write_dept(user, dept_key):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"No permission to upload to department: {dept_key}"
@@ -956,8 +956,9 @@ async def update_user_permissions(
     require_admin(user)
 
     # 验证角色值
-    valid_roles = {"admin", "editor", "viewer"}
+    valid_roles = {"admin", "member"}
     for role in data.roles:
+        logger.info(f"role: {role}")
         if role not in valid_roles:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1005,7 +1006,7 @@ async def delete_kb_file(
     pdf_path, dept_key, filename = found
     
     # 3. 验证部门上传权限
-    if not can_upload_dept(user, dept_key):
+    if not can_write_dept(user, dept_key):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"No permission to delete files from department: {dept_key}"

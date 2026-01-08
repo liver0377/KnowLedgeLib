@@ -141,20 +141,39 @@ class RBACDAO:
     @staticmethod
     def update_user_roles(user_id: str, roles: list[str]) -> bool:
         """更新用户的角色"""
+        # 将 user_id 转换为整数，确保类型正确
+        try:
+            user_id_int = int(user_id)
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid user_id format: {user_id}, error: {e}")
+            return False
+        
+        # 验证角色列表不为空
+        if not roles:
+            logger.warning(f"Empty roles list provided for user_id: {user_id}")
+            return False
+        
         with get_db_connection() as conn:
             try:
                 with conn.cursor() as cursor:
                     # 先删除用户的所有角色
-                    cursor.execute("DELETE FROM user_roles WHERE user_id = %s", (user_id,))
+                    cursor.execute("DELETE FROM user_roles WHERE user_id = %s", (user_id_int,))
                     
                     # 插入新角色
                     for role_key in roles:
                         cursor.execute("""
                             INSERT INTO user_roles (user_id, role_id)
                             SELECT %s, id FROM roles WHERE role_key = %s
-                        """, (user_id, role_key))
+                        """, (user_id_int, role_key))
+                        
+                        # 检查角色是否存在，如果不存在则回滚
+                        if cursor.rowcount == 0:
+                            conn.rollback()
+                            logger.error(f"Role not found: {role_key}")
+                            return False
                     
                     conn.commit()
+                    logger.info(f"Updated roles for user_id={user_id_int}: {roles}")
                     return True
             except Exception as e:
                 conn.rollback()
@@ -335,10 +354,10 @@ class RBACDAO:
                            pending_user['display_name'], pending_user['email']))
                     user_id = cursor.lastrowid
                     
-                    # 分配默认角色（viewer）
+                    # 分配默认角色（member）
                     cursor.execute("""
                         INSERT INTO user_roles (user_id, role_id)
-                        SELECT %s, id FROM roles WHERE role_key = 'viewer'
+                        SELECT %s, id FROM roles WHERE role_key = 'member'
                     """, (user_id,))
                     
                     # 分配部门权限

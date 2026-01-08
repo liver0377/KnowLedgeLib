@@ -1,278 +1,328 @@
-# RBAC权限系统数据库迁移说明
+# RBAC 数据库迁移说明
 
-## 概述
+本文档说明如何从旧的权限系统（editor/viewer作为全局角色）迁移到新的权限系统（editor/viewer作为部门级别权限，全局只有admin和member）。
 
-本次更新将权限系统从硬编码改为使用MySQL数据库，实现了完整的RBAC（基于角色的访问控制）和ABAC（基于属性的访问控制）功能。
+---
 
-## 改动内容
+## 一、迁移概述
 
-### 1. 数据库配置
+### 旧系统架构
+- 全局角色：`admin`, `editor`, `viewer`
+- 部门权限：通过 `allowed_dept_keys` 控制
+- editor/viewer 是全局角色，拥有固定的知识库权限
 
-#### docker-compose.yml (`infra/mysql/docker-compose.yml`)
-- 修改数据库名称：`ecommerce` → `knowledge_lib`
-- 移除了`MYSQL_USER`和`MYSQL_PASSWORD`配置（使用root用户）
-- 保留`MYSQL_ROOT_PASSWORD: rootpass`
+### 新系统架构
+- 全局角色：`admin`, `member`
+- 部门权限：通过 `user_departments` 表的 `can_read` 和 `can_write` 字段控制
+- editor/viewer 不再是全局角色，而是部门级别的权限
 
-#### 环境变量 (`.env`)
-新增MySQL配置项：
-```env
-MYSQL_HOST=127.0.0.1
-MYSQL_PORT=3306
-MYSQL_USER=root
-MYSQL_PASSWORD=rootpass
-MYSQL_DB=knowledge_lib
-```
+---
 
-### 2. 新增文件
+## 二、迁移步骤
 
-#### `src/service/db.py`
-- 实现MySQL数据库连接管理
-- 提供`RBACDAO`类封装所有数据库操作
-- 包含以下方法：
-  - `get_user_by_username()` - 根据用户名获取用户信息
-  - `get_user_roles()` - 获取用户角色
-  - `get_user_permissions()` - 获取用户权限点
-  - `get_user_departments()` - 获取用户可访问部门
-  - `list_all_users()` - 列出所有用户（管理员用）
-  - `update_user_roles()` - 更新用户角色
-  - `verify_password()` - 密码验证
+### 步骤 1: 备份数据库
 
-### 3. 修改文件
-
-#### `src/core/settings.py`
-新增MySQL配置字段：
-```python
-MYSQL_HOST: str = Field(default="")
-MYSQL_PORT: Optional[int] = Field(default=3306)
-MYSQL_USER: str = Field(default="")
-MYSQL_PASSWORD: SecretStr = Field(default="")
-MYSQL_DB: str = Field(default="knowledge_lib")
-MYSQL_CHARSET: str = Field(default="utf8mb4")
-```
-
-#### `src/service/auth.py`
-**删除的内容：**
-- 硬编码的`ROLE_PERMS`字典
-- 硬编码的`_DEMO_ALLOWED_DEPT_KEYS`字典
-
-**修改的内容：**
-- `get_user_context()` - 从数据库加载用户权限和部门访问权限
-- `require_perm()` - 从数据库查询用户权限集合
-- `can_access_dept()` - 从数据库查询用户可访问的部门
-- `can_upload_dept()` - 从数据库查询用户的部门写权限
-
-**保留的内容：**
-- 角色常量（`ROLE_ADMIN`, `ROLE_EDITOR`, `ROLE_VIEWER`）
-- 权限点常量（用于代码中引用）
-- JWT token生成和解析逻辑
-
-#### `src/service/service.py`
-
-**登录接口 (`/auth/login`)：**
-- 删除硬编码的`_demo_users`字典
-- 改用`RBACDAO.get_user_by_username()`从数据库查询用户
-- 使用`RBACDAO.verify_password()`验证密码
-- 使用`RBACDAO.get_user_roles()`获取用户角色
-
-**用户列表接口 (`/admin/users`)：**
-- 删除硬编码用户列表
-- 改用`RBACDAO.list_all_users()`从数据库获取
-
-**更新用户权限接口 (`/admin/users/{user_id}/permissions`)：**
-- 改用`RBACDAO.update_user_roles()`更新数据库
-
-## 数据库Schema
-
-数据库表结构定义在以下文件中：
-- `scripts/rbac_schema.sql` - 数据库表结构
-- `scripts/rbac_seed_data.sql` - 初始化数据
-
-### 核心表
-
-1. **users** - 用户表
-2. **roles** - 角色表
-3. **permissions** - 权限点表
-4. **departments** - 部门表
-5. **user_roles** - 用户-角色关联表
-6. **role_permissions** - 角色-权限关联表
-7. **user_departments** - 用户-部门关联表（支持读/写权限）
-8. **audit_logs** - 审计日志表（可选）
-
-### 视图
-
-1. **v_user_permissions** - 用户完整权限视图
-2. **v_user_dept_access** - 用户部门访问权限视图
-
-## 初始化数据
-
-种子数据包含：
-- 3个角色：admin, editor, viewer
-- 6个权限点：kb:file:list, kb:file:detail, kb:file:download, kb:file:upload, admin:user:list, admin:user:update
-- 3个示例部门：AI, micro_service, database
-- 3个示例用户：
-  - user-ryan (admin) - 拥有所有权限
-  - user-editor (editor) - 拥有知识库相关权限
-  - user-viewer (viewer) - 只有查看和下载权限
-
-## 部署步骤
-
-### 1. 启动MySQL容器
+在执行任何迁移操作之前，**务必先备份数据库**。
 
 ```bash
-cd infra/mysql
-docker-compose up -d
+# MySQL 备份命令示例
+mysqldump -u your_username -p knowledge_lib > backup_$(date +%Y%m%d_%H%M%S).sql
 ```
 
-### 2. 执行数据库初始化脚本
+### 步骤 2: 更新数据库 Schema
+
+执行新的 schema 文件：
 
 ```bash
-# 连接到MySQL容器
-docker exec -it knowledge-mysql mysql -uroot -prootpass
-
-# 或者直接执行SQL文件
-docker exec -i knowledge-mysql mysql -uroot -prootpass < scripts/rbac_schema.sql
-docker exec -i knowledge-mysql mysql -uroot -prootpass knowledge_lib < scripts/rbac_seed_data.sql
+mysql -u your_username -p knowledge_lib < scripts/rbac_schema.sql
 ```
 
-### 3. 验证数据库连接
+### 步骤 3: 初始化新数据
 
-启动服务，检查日志中是否有MySQL连接成功的消息：
-```bash
-python src/run_service.py
-```
-
-应该看到类似日志：
-```
-INFO:service.db:MySQL connection pool created: 127.0.0.1:3306/knowledge_lib
-```
-
-### 4. 测试登录
-
-使用示例用户登录（密码为：password123）：
-- user-ryan (管理员)
-- user-editor (编辑者)
-- user-viewer (查看者)
+执行新的 seed data 文件：
 
 ```bash
-curl -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username": "user-ryan", "password": "password123"}'
+mysql -u your_username -p knowledge_lib < scripts/rbac_seed_data.sql
 ```
 
-## 功能测试
+### 步骤 4: 迁移用户角色
 
-### 1. 用户登录测试
-```bash
-# 使用admin用户登录
-curl -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username": "user-ryan", "password": "password123"}' \
-  -c cookies.txt
-
-# 查看当前用户信息
-curl http://localhost:8080/auth/me -b cookies.txt
-```
-
-### 2. 权限验证测试
-```bash
-# 测试知识库文件列表（需要kb:file:list权限）
-curl http://localhost:8080/kb/files -b cookies.txt
-
-# 测试用户列表（需要admin:user:list权限，只有admin可以访问）
-curl http://localhost:8080/admin/users -b cookies.txt
-```
-
-### 3. 部门访问权限测试
-```bash
-# 使用viewer用户登录（只能访问AI部门）
-curl -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username": "user-viewer", "password": "password123"}' \
-  -c viewer_cookies.txt
-
-# 测试访问AI部门的文件（应该成功）
-curl http://localhost:8080/kb/files?dept_key=AI -b viewer_cookies.txt
-
-# 测试访问micro_service部门的文件（应该失败或返回空列表）
-curl http://localhost:8080/kb/files?dept_key=micro_service -b viewer_cookies.txt
-```
-
-### 4. 用户权限更新测试
-```bash
-# 更新用户角色（需要admin权限）
-curl -X POST http://localhost:8080/admin/users/2/permissions \
-  -H "Content-Type: application/json" \
-  -d '{"roles": ["admin", "editor"]}' \
-  -b cookies.txt
-```
-
-## 数据库操作
-
-### 添加新用户
+将所有 `editor` 和 `viewer` 角色用户改为 `member` 角色：
 
 ```sql
-INSERT INTO users (username, password_hash, display_name, email, is_active)
-VALUES ('newuser', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.uQxB3z3E8TBZOe', '新用户', 'new@example.com', 1);
+-- 更新 user_roles 表，将 editor 和 viewer 角色改为 member
+UPDATE user_roles ur
+JOIN roles r ON ur.role_id = r.id
+SET ur.role_id = (SELECT id FROM roles WHERE role_key = 'member')
+WHERE r.role_key IN ('editor', 'viewer');
 
--- 分配角色
-INSERT INTO user_roles (user_id, role_id)
-SELECT (SELECT id FROM users WHERE username = 'newuser'), id FROM roles WHERE role_key = 'viewer';
-```
-
-### 添加新权限
-
-```sql
-INSERT INTO permissions (perm_key, name, description, resource, action, is_system)
-VALUES ('kb:file:delete', '删除文件', '删除知识库文件', 'kb', 'delete', 1);
-
--- 分配给admin角色
-INSERT INTO role_permissions (role_id, permission_id)
-SELECT id FROM roles WHERE role_key = 'admin',
-SELECT id FROM permissions WHERE perm_key = 'kb:file:delete';
-```
-
-### 查询用户权限
-
-```sql
--- 查询用户的所有权限
-SELECT u.username, r.role_key, p.perm_key
+-- 验证迁移结果
+SELECT u.username, r.role_key
 FROM users u
 JOIN user_roles ur ON u.id = ur.user_id
 JOIN roles r ON ur.role_id = r.id
-JOIN role_permissions rp ON r.id = rp.role_id
-JOIN permissions p ON rp.permission_id = p.id
-WHERE u.username = 'user-ryan';
+ORDER BY u.username;
 ```
 
-## 注意事项
+### 步骤 5: 迁移部门权限
 
-1. **密码哈希**：种子数据中的密码是`password123`的bcrypt哈希值。创建新用户时需要使用相同的哈希算法：
-   ```python
-   from passlib.context import CryptContext
-   pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
-   hashed_password = pwd_context.hash("your_password")
-   ```
+根据用户之前的角色，设置 `user_departments` 表中的读写权限：
 
-2. **数据库连接**：每次数据库操作都会创建新连接，确保MySQL容器正常运行且端口3306可访问。
+```sql
+-- 为之前有 editor 角色的用户设置部门写权限
+-- 假设这些用户已经可以访问某些部门（通过 allowed_dept_keys）
+-- 这里需要根据实际的业务逻辑调整
 
-3. **权限检查失败**：如果数据库查询失败，系统会使用空权限（安全第一），建议检查日志。
+-- 示例：如果用户之前是 editor，在所有已授权的部门设置 can_write=1
+UPDATE user_departments ud
+JOIN user_roles ur ON ud.user_id = ur.user_id
+JOIN roles r ON ur.role_id = r.id
+SET ud.can_write = 1
+WHERE r.role_key IN ('admin', 'editor');
 
-4. **Docker网络**：如果服务运行在Docker容器中，需要使用`host.docker.internal`代替`127.0.0.1`。
+-- 为之前有 viewer 角色的用户确保只有读权限
+-- 注意：这些用户之前就不能写，所以 can_write 应该已经是 0
+-- 这里主要是确保一致性
+```
 
-## 回滚方案
+**重要提示**：
+- 如果系统之前没有使用 `allowed_dept_keys`，而是通过其他方式控制部门访问，需要根据实际情况调整迁移脚本
+- `admin` 用户不受部门限制，但数据库中仍应保留部门记录作为默认值
 
-如果需要回滚到硬编码版本：
+### 步骤 6: 清理旧角色
 
-1. 恢复`src/service/auth.py`中的硬编码数据
-2. 恢复`src/service/service.py`中的`_demo_users`字典
-3. 删除`src/service/db.py`文件
-4. 从`.env`中移除MySQL配置
+删除 `editor` 和 `viewer` 角色记录：
 
-## 后续优化建议
+```sql
+-- 删除 editor 和 viewer 角色（确保没有用户还在使用这些角色）
+DELETE FROM roles WHERE role_key IN ('editor', 'viewer');
+```
 
-1. **连接池**：考虑使用`DBUtils`或`SQLAlchemy`实现真正的连接池
-2. **缓存**：对用户权限等不常变化的数据添加缓存（Redis）
-3. **审计日志**：启用`audit_logs`表记录关键操作
-4. **密码重置**：添加密码重置功能
-5. **用户注册**：添加用户注册接口（如果需要）
-6. **部门层级**：支持部门层级结构（已设计parent_id字段）
+### 步骤 7: 验证迁移结果
+
+```sql
+-- 1. 检查角色列表（应该只有 admin 和 member）
+SELECT * FROM roles ORDER BY priority DESC;
+
+-- 2. 检查用户角色（所有用户应该只有 admin 和 member）
+SELECT u.username, GROUP_CONCAT(r.role_key) AS roles
+FROM users u
+JOIN user_roles ur ON u.id = ur.user_id
+JOIN roles r ON ur.role_id = r.id
+GROUP BY u.id, u.username
+ORDER BY u.username;
+
+-- 3. 检查用户部门权限
+SELECT u.username, d.dept_key, ud.can_read, ud.can_write,
+    CASE 
+        WHEN ud.can_read = 1 AND ud.can_write = 1 THEN 'editor'
+        WHEN ud.can_read = 1 AND ud.can_write = 0 THEN 'viewer'
+        ELSE 'no access'
+    END AS dept_role
+FROM users u
+JOIN user_departments ud ON u.id = ud.user_id
+JOIN departments d ON ud.department_id = d.id
+ORDER BY u.username, d.dept_key;
+```
+
+---
+
+## 三、完整迁移脚本
+
+将以下 SQL 保存为 `migrate_to_new_rbac.sql`，然后一次性执行：
+
+```sql
+-- =============================================================================
+-- RBAC 数据库迁移脚本
+-- 从旧的权限系统迁移到新的权限系统
+-- =============================================================================
+
+USE knowledge_lib;
+
+-- 步骤 1: 更新用户角色（editor/viewer -> member）
+UPDATE user_roles ur
+JOIN roles r ON ur.role_id = r.id
+SET ur.role_id = (SELECT id FROM roles WHERE role_key = 'member')
+WHERE r.role_key IN ('editor', 'viewer');
+
+-- 步骤 2: 为之前的 editor 角色用户设置部门写权限
+UPDATE user_departments ud
+JOIN user_roles ur ON ud.user_id = ur.user_id
+JOIN roles r ON ur.role_id = r.id
+SET ud.can_write = 1
+WHERE r.role_key IN ('admin', 'editor');
+
+-- 步骤 3: 验证迁移结果
+SELECT '--- 角色列表 ---' AS info;
+SELECT id, role_key, name, priority FROM roles ORDER BY priority DESC;
+
+SELECT '--- 用户角色映射 ---' AS info;
+SELECT u.id AS user_id, u.username, r.role_key, r.name AS role_name
+FROM users u
+JOIN user_roles ur ON u.id = ur.user_id
+JOIN roles r ON ur.role_id = r.id
+ORDER BY u.username;
+
+SELECT '--- 用户部门访问权限 ---' AS info;
+SELECT u.id AS user_id, u.username, d.dept_key, ud.can_read, ud.can_write,
+    CASE 
+        WHEN ud.can_read = 1 AND ud.can_write = 1 THEN 'editor'
+        WHEN ud.can_read = 1 AND ud.can_write = 0 THEN 'viewer'
+        ELSE 'no access'
+    END AS dept_role
+FROM users u
+JOIN user_departments ud ON u.id = ud.user_id
+JOIN departments d ON ud.department_id = d.id
+ORDER BY u.username, d.dept_key;
+
+-- 步骤 4: 删除旧角色（确保没有用户在使用）
+-- 取消注释以下语句执行删除
+-- DELETE FROM roles WHERE role_key IN ('editor', 'viewer');
+```
+
+执行迁移脚本：
+
+```bash
+mysql -u your_username -p knowledge_lib < migrate_to_new_rbac.sql
+```
+
+---
+
+## 四、迁移后操作
+
+### 1. 重启后端服务
+
+```bash
+# 停止服务
+# 启动服务
+python src/run_service.py
+```
+
+### 2. 测试登录
+
+使用测试账号登录，验证 token 中的 roles 字段是否正确：
+
+```bash
+# 测试 admin 用户
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "user-ryan", "password": "password123"}'
+
+# 测试 member 用户
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "user-editor", "password": "password123"}'
+```
+
+### 3. 测试权限
+
+测试以下操作，确保权限控制正常：
+
+- [ ] 管理员可以访问所有部门
+- [ ] 普通用户只能访问有读权限的部门
+- [ ] 普通用户只能上传到有写权限的部门
+- [ ] 无权限时返回 403 或 404
+- [ ] 前端权限显示正确
+
+---
+
+## 五、常见问题
+
+### Q1: 迁移后用户无法登录？
+
+**A**: 检查以下几点：
+1. 确认 `user_roles` 表中用户角色的 `role_key` 是 `admin` 或 `member`
+2. 确认 JWT token 中的 `roles` 字段只包含有效的角色
+3. 查看后端日志，确认错误信息
+
+### Q2: 部门权限不正确？
+
+**A**: 检查以下几点：
+1. 确认 `user_departments` 表中 `can_read` 和 `can_write` 的值是否正确
+2. 确认后端的 `can_access_dept()` 和 `can_write_dept()` 函数正常工作
+3. 查看数据库查询日志，确认权限检查逻辑
+
+### Q3: 如何批量设置用户部门权限？
+
+**A**: 可以通过以下方式批量设置：
+
+```sql
+-- 为特定用户设置多个部门的权限
+INSERT INTO user_departments (user_id, department_id, can_read, can_write)
+VALUES 
+    (user_id_1, dept_id_1, 1, 1),
+    (user_id_1, dept_id_2, 1, 0),
+    (user_id_2, dept_id_1, 1, 1)
+ON DUPLICATE KEY UPDATE 
+    can_read = VALUES(can_read), 
+    can_write = VALUES(can_write);
+```
+
+或者通过后端管理界面批量操作（如果有的话）。
+
+---
+
+## 六、回滚方案
+
+如果迁移后出现问题，可以使用备份回滚：
+
+```bash
+# 恢复数据库
+mysql -u your_username -p knowledge_lib < backup_YYYYMMDD_HHMMSS.sql
+```
+
+---
+
+## 七、联系人
+
+如果在迁移过程中遇到问题，请联系：
+
+- 技术支持：[技术支持邮箱]
+- GitHub Issues: [项目 GitHub 地址]
+
+---
+
+## 八、迁移检查清单
+
+在完成迁移后，请确认以下事项：
+
+- [ ] 数据库已备份
+- [ ] 新的 schema 已执行
+- [ ] 新的 seed data 已执行
+- [ ] 用户角色已更新（editor/viewer -> member）
+- [ ] 部门权限已正确设置（can_read/can_write）
+- [ ] 旧角色已删除（editor/viewer）
+- [ ] 后端服务已重启
+- [ ] 用户登录功能正常
+- [ ] 部门访问权限正常
+- [ ] 文件上传/下载权限正常
+- [ ] 前端权限显示正常
+- [ ] 管理员权限正常
+- [ ] 所有测试用例通过
+
+---
+
+## 九、迁移时间估算
+
+- 数据库备份：5 分钟
+- Schema 更新：2 分钟
+- Seed data 初始化：1 分钟
+- 用户角色迁移：2 分钟
+- 部门权限迁移：5-10 分钟（取决于数据量）
+- 验证测试：10-15 分钟
+
+**总计：约 25-35 分钟**
+
+---
+
+## 十、注意事项
+
+1. **数据一致性**: 迁移前请确认数据库中没有脏数据
+2. **停机时间**: 建议在业务低峰期执行迁移，避免影响用户
+3. **测试环境**: 建议先在测试环境验证迁移脚本，再在生产环境执行
+4. **日志记录**: 迁移过程中请保留所有日志，便于问题排查
+5. **用户通知**: 迁移完成后，建议通知用户可能需要重新登录
+
+---
+
+*最后更新时间：2026-01-08*
