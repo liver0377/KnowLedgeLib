@@ -17,9 +17,44 @@ const newDeptDialogVisible = ref(false);
 const selectedDeptForUpload = ref("");
 const newDeptName = ref("");
 const uploading = ref(false);
+const uploadProgress = ref(0);
+const uploadStage = ref<string>("");
 const searchQuery = ref("");
 const selectedDept = ref<string | null>(null);
 const newDeptError = ref("");
+
+/** ===== Progress Animation ===== */
+let progressInterval: number | null = null;
+
+function startProgressAnimation() {
+  uploadProgress.value = 0;
+  uploadStage.value = "正在上传文件...";
+  
+  progressInterval = window.setInterval(() => {
+    if (uploadProgress.value >= 90) {
+      uploadProgress.value = 0;
+    } else {
+      uploadProgress.value += 10;
+    }
+    
+    if (uploadProgress.value < 30) {
+      uploadStage.value = "正在上传文件...";
+    } else if (uploadProgress.value < 60) {
+      uploadStage.value = "正在解析文档内容...";
+    } else if (uploadProgress.value < 90) {
+      uploadStage.value = "正在生成向量并保存到数据库...";
+    }
+  }, 800);
+}
+
+function stopProgressAnimation() {
+  if (progressInterval) {
+    clearInterval(progressInterval);
+    progressInterval = null;
+  }
+  uploadProgress.value = 100;
+  uploadStage.value = "处理完成！";
+}
 
 /** ===== Resizable Sidebar ===== */
 const sidebarWidth = ref<number>(280);
@@ -161,16 +196,31 @@ async function handleFileUpload(event: Event) {
   }
   
   uploading.value = true;
+  startProgressAnimation();
+  
   try {
     await uploadKBFile(selectedDeptForUpload.value, file);
+    
+    stopProgressAnimation();
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    uploadProgress.value = 0;
+    uploadStage.value = "";
+    
     alert("文件上传成功");
     uploadDialogVisible.value = false;
     await loadFiles();
   } catch (error: any) {
+    stopProgressAnimation();
+    uploadProgress.value = 0;
+    uploadStage.value = "";
+    
     console.error("上传失败:", error);
     alert("上传失败: " + error.message);
   } finally {
     uploading.value = false;
+    stopProgressAnimation();
+    uploadProgress.value = 0;
     input.value = "";
   }
 }
@@ -375,9 +425,25 @@ onUnmounted(() => {
               :disabled="uploading"
             />
           </label>
+          
+          <div v-if="uploading || uploadProgress > 0" class="progress-section">
+            <div class="progress-bar-container">
+              <div class="progress-bar" :style="{ width: uploadProgress + '%' }"></div>
+            </div>
+            <div class="progress-info">
+              <span class="progress-text">{{ uploadStage || '处理中...' }}</span>
+              <span class="progress-percent">{{ uploadProgress }}%</span>
+            </div>
+          </div>
         </div>
         <div class="modal-footer">
-          <button class="btn" @click="uploadDialogVisible = false">取消</button>
+          <button 
+            class="btn" 
+            @click="uploadDialogVisible = false" 
+            :disabled="uploading"
+          >
+            {{ uploading ? '处理中...' : '取消' }}
+          </button>
         </div>
       </div>
     </div>
@@ -782,6 +848,60 @@ onUnmounted(() => {
   color: #dc2626;
   font-size: 12px;
   margin-top: 4px;
+}
+
+/* Progress Section */
+.progress-section {
+  margin-top: 20px;
+  padding: 16px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 50%, #6366f1 100%);
+  background-size: 200% 100%;
+  animation: progressGradient 2s linear infinite;
+  transition: width 0.4s ease-out;
+  border-radius: 4px;
+}
+
+@keyframes progressGradient {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.progress-text {
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.progress-percent {
+  font-size: 14px;
+  color: #6366f1;
+  font-weight: 700;
 }
 
 /* States */

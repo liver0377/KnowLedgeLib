@@ -396,12 +396,12 @@ if __name__ == "__main__":
         overlap=500,
     )
 
-    retriever = milvus_store.as_retriever(search_kwargs={"k": 3})
-    query = "What's my company's mission and values"
-    results = retriever.invoke(query)
+    # retriever = milvus_store.as_retriever(search_kwargs={"k": 3})
+    # query = "What's my company's mission and values"
+    # results = retriever.invoke(query)
 
-    for i, doc in enumerate(results, start=1):
-        print(f"\n🔹 Result {i}:\n{doc.page_content}\nTags: {doc.metadata}")
+    # for i, doc in enumerate(results, start=1):
+    #     print(f"\n🔹 Result {i}:\n{doc.page_content}\nTags: {doc.metadata}")
 
     # sql_store = cerate_milvus_sql_db(
     #     folder_path=folder_path,
