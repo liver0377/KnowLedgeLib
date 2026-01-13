@@ -119,13 +119,11 @@ async def retrieve_documents(state: AgentState, config: RunnableConfig) -> Agent
 
 async def prepare_augmented_prompt(state: AgentState, config: RunnableConfig) -> AgentState:
     """Prepare a prompt augmented with retrieved document content."""
-    # Get retrieved documents
     documents = state.get("retrieved_documents", [])
 
     if not documents:
         return {"messages": []}
 
-    # Format retrieved documents for the model
     formatted_docs = "\n\n".join(
         [
             f"--- Document {i + 1} ---\n"
@@ -138,30 +136,30 @@ async def prepare_augmented_prompt(state: AgentState, config: RunnableConfig) ->
         ]
     )
 
-    # Store formatted documents in the state
     return {"kb_documents": formatted_docs, "messages": []}
 
 
 def wrap_model(model: BaseChatModel) -> RunnableSerializable[AgentState, AIMessage]:
     """Wrap the model with a system prompt for the Knowledge Base agent."""
 
-    def create_system_message(state):
+    def create_messages(state):
         base_prompt = DOC_SYSTEM_PROMPT
 
-        # Check if documents were retrieved
-        if "kb_documents" in state:
-            # Append document information to the system prompt
-            document_prompt = f"\n\nI've retrieved the following documents that may be relevant to the query:\n\n{state['kb_documents']}\n\nPlease use these documents to inform your response to the user's query. Only use information from these documents and clearly indicate when you are unsure."
-            return [SystemMessage(content=base_prompt + document_prompt)] + state["messages"]
-        else:
-            # No documents were retrieved
-            no_docs_prompt = (
-                "\n\nNo relevant documents were found in the knowledge base for this query."
-            )
-            return [SystemMessage(content=base_prompt + no_docs_prompt)] + state["messages"]
+        # Start with system message containing only instructions
+        messages = [SystemMessage(content=base_prompt)]
+
+        # If documents were retrieved, add them as a separate HumanMessage
+        if "kb_documents" in state and state["kb_documents"]:
+            document_context = f"以下是检索到的相关文档：\n\n{state['kb_documents']}"
+            messages.append(HumanMessage(content=document_context))
+
+        # Append original conversation history
+        messages.extend(state["messages"])
+
+        return messages
 
     preprocessor = RunnableLambda(
-        create_system_message,
+        create_messages,
         name="StateModifier",
     )
     return RunnableSequence(preprocessor, model)
