@@ -25,7 +25,6 @@ from langfuse.langchain import (
     CallbackHandler,  # type: ignore[import-untyped]
 )
 from langgraph.types import Command, Interrupt
-from langsmith import Client as LangsmithClient
 
 from agents import DEFAULT_AGENT, AgentGraph, get_agent, get_all_agent_info, load_agent
 from core import settings
@@ -852,20 +851,24 @@ async def stream(
 @protected_router.post("/feedback")
 async def feedback(feedback: Feedback) -> FeedbackResponse:
     """
-    Record feedback for a run to LangSmith.
+    Record feedback for a run to Langfuse.
 
-    This is a simple wrapper for the LangSmith create_feedback API, so the
+    This is a simple wrapper for the Langfuse score API, so the
     credentials can be stored and managed in the service rather than the client.
-    See: https://api.smith.langchain.com/redoc#tag/feedback/operation/create_feedback_api_v1_feedback_post
     """
-    client = LangsmithClient()
+    if not settings.LANGFUSE_TRACING:
+        raise HTTPException(status_code=501, detail="Langfuse tracing is not enabled")
+
+    langfuse = Langfuse()
     kwargs = feedback.kwargs or {}
-    client.create_feedback(
-        run_id=feedback.run_id,
-        key=feedback.key,
-        score=feedback.score,
-        **kwargs,
+
+    langfuse.create_score(
+        name=feedback.key,
+        value=feedback.score,
+        trace_id=feedback.run_id,
+        comment=kwargs.get("comment"),
     )
+
     return FeedbackResponse()
 
 

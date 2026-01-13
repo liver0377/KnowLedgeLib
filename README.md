@@ -94,9 +94,13 @@ MILVUS_PORT=19530
 # JWT 密钥（必须）
 JWT_SECRET_KEY=your_secret_key_here
 
-# LangSmith 追踪（可选）
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_API_KEY=your_langsmith_api_key
+# Langfuse 追踪（可选）
+LANGFUSE_TRACING=true
+LANGFUSE_PUBLIC_KEY=your_langfuse_public_key
+LANGFUSE_SECRET_KEY=your_langfuse_secret_key
+LANGFUSE_HOST=https://cloud.langfuse.com
+# 启用自动评估（如引用存在性检测）
+LANGFUSE_AUTO_EVAL=true
 ```
 
 ### 3. 启动 MySQL 服务

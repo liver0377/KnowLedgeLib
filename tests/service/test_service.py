@@ -1,7 +1,7 @@
 import json
 from unittest.mock import AsyncMock, patch
 
-import langsmith
+from langfuse import Langfuse
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langgraph.pregel.types import StateSnapshot
@@ -166,10 +166,11 @@ def test_invoke_interrupt(test_client, mock_agent) -> None:
     assert output.content == INTERRUPT
 
 
-@patch("service.service.LangsmithClient")
-def test_feedback(mock_client: langsmith.Client, test_client) -> None:
-    ls_instance = mock_client.return_value
-    ls_instance.create_feedback.return_value = None
+@patch("service.service.Langfuse")
+def test_feedback(mock_langfuse: Langfuse, test_client, mock_settings) -> None:
+    mock_settings.LANGFUSE_TRACING = True
+    langfuse_instance = mock_langfuse.return_value
+    langfuse_instance.score.return_value = None
     body = {
         "run_id": "847c6285-8fc9-4560-a83f-4e6285809254",
         "key": "human-feedback-stars",
@@ -178,10 +179,11 @@ def test_feedback(mock_client: langsmith.Client, test_client) -> None:
     response = test_client.post("/feedback", json=body)
     assert response.status_code == 200
     assert response.json() == {"status": "success"}
-    ls_instance.create_feedback.assert_called_once_with(
-        run_id="847c6285-8fc9-4560-a83f-4e6285809254",
-        key="human-feedback-stars",
-        score=0.8,
+    langfuse_instance.score.assert_called_once_with(
+        name="human-feedback-stars",
+        value=0.8,
+        trace_id="847c6285-8fc9-4560-a83f-4e6285809254",
+        comment=None,
     )
 
 

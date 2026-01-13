@@ -1,16 +1,35 @@
 import logging
 import os
+from typing import Any
 
-from typing import Any, List
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from langchain_core.runnables import RunnableConfig, RunnableSerializable, RunnableLambda, RunnableSequence
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import (
+    RunnableConfig,
+    RunnableLambda,
+    RunnableSequence,
+    RunnableSerializable,
+)
+
+from agents.knowledge_base_agent.prompts import DOC_SYSTEM_PROMPT
 from agents.knowledge_base_agent.retrievers import make_retriever
 from agents.knowledge_base_agent.state import AgentState
-from agents.knowledge_base_agent.prompts import DOC_SYSTEM_PROMPT
 from core import get_model, settings
+from evaluation import (
+    CitationCorrectnessEvaluator,
+    CitationEvaluator,
+    EvaluationManager,
+    NeedsClarificationEvaluator,
+    SafetyRiskEvaluator,
+)
 
 logger = logging.getLogger(__name__)
+
+evaluation_manager = EvaluationManager()
+evaluation_manager.register(CitationEvaluator())
+evaluation_manager.register(NeedsClarificationEvaluator())
+evaluation_manager.register(SafetyRiskEvaluator())
+evaluation_manager.register(CitationCorrectnessEvaluator())
 
 
 def _build_milvus_expr_for_dept_keys(allowed: list[str]) -> str | None:
@@ -28,6 +47,7 @@ def _build_milvus_expr_for_dept_keys(allowed: list[str]) -> str | None:
     allowed_list = ", ".join([f'"{d}"' for d in allowed])
     return f'metadata["dept_key"] in [{allowed_list}]', "ALLOW_SOME"
 
+
 async def retrieve_documents(state: AgentState, config: RunnableConfig) -> AgentState:
     human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
     if not human_messages:
@@ -36,8 +56,8 @@ async def retrieve_documents(state: AgentState, config: RunnableConfig) -> Agent
     query = human_messages[-1].content
 
     cfg: dict[str, Any] = config.get("configurable")
-    user_id: str = cfg.get("user_id", "")
-    roles: list[str] = cfg.get("roles", [])
+    _user_id: str = cfg.get("user_id", "")
+    _roles: list[str] = cfg.get("roles", [])
     allowed_dept_keys: list[str] = cfg.get("allowed_dept_keys") or []
 
     # allowed_dept_keys = get_allowed_dept_keys(user_id=user_id, roles=roles, dept_key=dept_key)
@@ -46,8 +66,12 @@ async def retrieve_documents(state: AgentState, config: RunnableConfig) -> Agent
     if dept_expr == 'metadata["dept_key"] in ["__none__"]':
         return {
             "retrieved_documents": [],
-            "messages": [AIMessage(content="你当前没有访问对应企业知识库文档的权限，请联系管理员或在权限系统中申请相应部门的访问权限。")],
-            "stop_chain": True
+            "messages": [
+                AIMessage(
+                    content="你当前没有访问对应企业知识库文档的权限，请联系管理员或在权限系统中申请相应部门的访问权限。"
+                )
+            ],
+            "stop_chain": True,
         }
 
     final_expr = dept_expr
@@ -62,29 +86,31 @@ async def retrieve_documents(state: AgentState, config: RunnableConfig) -> Agent
             # （不展示任何受限内容）
             return {
                 "retrieved_documents": [],
-                "messages": [AIMessage(content="未检索到你当前可访问的相关文档。由于权限限制，可能存在相关资料但你暂无权限查看；请申请相应部门的访问权限或联系管理员。")],
+                "messages": [
+                    AIMessage(
+                        content="未检索到你当前可访问的相关文档。由于权限限制，可能存在相关资料但你暂无权限查看；请申请相应部门的访问权限或联系管理员。"
+                    )
+                ],
                 "stop_chain": True,
             }
 
         document_summaries = []
         for i, doc in enumerate(retrieved_docs, 1):
-            document_summaries.append({
-                "id": doc.metadata.get("chunk_id", f"doc-{i}"),
-                "source": doc.metadata.get("source", "Unknown"),
-                "title": doc.metadata.get("title", f"Document {i}"),
-                "content": doc.page_content,
-                "relevance_score": doc.metadata.get("score", 0),
-                "dept_key": doc.metadata.get("dept_key"),
-                "file_id": doc.metadata.get("file_id"),  # 用于生成文档链接
-                "filename": doc.metadata.get("filename"),  # 文件名
-                "page": doc.metadata.get("page", 1),  # 页码
-            })
+            document_summaries.append(
+                {
+                    "id": doc.metadata.get("chunk_id", f"doc-{i}"),
+                    "source": doc.metadata.get("source", "Unknown"),
+                    "title": doc.metadata.get("title", f"Document {i}"),
+                    "content": doc.page_content,
+                    "relevance_score": doc.metadata.get("score", 0),
+                    "dept_key": doc.metadata.get("dept_key"),
+                    "file_id": doc.metadata.get("file_id"),  # 用于生成文档链接
+                    "filename": doc.metadata.get("filename"),  # 文件名
+                    "page": doc.metadata.get("page", 1),  # 页码
+                }
+            )
 
-        return {
-            "retrieved_documents": document_summaries,
-            "messages": [],
-            "stop_chain": False
-        }
+        return {"retrieved_documents": document_summaries, "messages": [], "stop_chain": False}
 
     except Exception as e:
         logger.error(f"Error retrieving documents: {str(e)}")
@@ -115,6 +141,7 @@ async def prepare_augmented_prompt(state: AgentState, config: RunnableConfig) ->
     # Store formatted documents in the state
     return {"kb_documents": formatted_docs, "messages": []}
 
+
 def wrap_model(model: BaseChatModel) -> RunnableSerializable[AgentState, AIMessage]:
     """Wrap the model with a system prompt for the Knowledge Base agent."""
 
@@ -139,6 +166,7 @@ def wrap_model(model: BaseChatModel) -> RunnableSerializable[AgentState, AIMessa
     )
     return RunnableSequence(preprocessor, model)
 
+
 async def acall_model(state: AgentState, config: RunnableConfig) -> AgentState:
     if state.get("stop_chain"):
         # 直接把上一步的 AIMessage 返回给用户
@@ -147,4 +175,15 @@ async def acall_model(state: AgentState, config: RunnableConfig) -> AgentState:
     m = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
     model_runnable = wrap_model(m)
     response = await model_runnable.ainvoke(state, config)
+
+    # 自动评估 - 一行搞定！
+    if hasattr(response, "id"):
+        evaluation_manager.evaluate_all(
+            output=str(response.content) if response.content else "",
+            context={
+                "trace_id": str(response.id),
+                "input": state.get("messages", [])[-1].content if state.get("messages") else None,
+            },
+        )
+
     return {"messages": [response]}

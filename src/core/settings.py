@@ -119,6 +119,7 @@ class Settings(BaseSettings):
     LANGFUSE_HOST: Annotated[str, BeforeValidator(check_str_is_http)] = "https://cloud.langfuse.com"
     LANGFUSE_PUBLIC_KEY: SecretStr | None = None
     LANGFUSE_SECRET_KEY: SecretStr | None = None
+    LANGFUSE_AUTO_EVAL: bool = True
 
     # Database Configuration
     DATABASE_TYPE: DatabaseType = (
@@ -161,12 +162,12 @@ class Settings(BaseSettings):
     )
 
     # Auth Configuration
-    JWT_ALG: str | None = "HS256"                         # JWT signature 加密算法
-    JWT_COOKIE_NAME: str | None = "access_token"          # JWT cookie 字段名
-    JWT_EXPIRES_SECONDS: int | None = 60 * 60 # 1h
-    JWT_SECRET: SecretStr | None = "dev-only-change-me"   # JWT加密秘钥
+    JWT_ALG: str | None = "HS256"  # JWT signature 加密算法
+    JWT_COOKIE_NAME: str | None = "access_token"  # JWT cookie 字段名
+    JWT_EXPIRES_SECONDS: int | None = 60 * 60  # 1h
+    JWT_SECRET: SecretStr | None = "dev-only-change-me"  # JWT加密秘钥
 
-    # KnowledgeBase 
+    # KnowledgeBase
     KB_FILES_ROOT: str | None = "data/"
 
     def model_post_init(self, __context: Any) -> None:
