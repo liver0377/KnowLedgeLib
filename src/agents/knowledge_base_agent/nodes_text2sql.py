@@ -8,20 +8,24 @@ from agents.knowledge_base_agent.state import AgentState
 from agents.knowledge_base_agent.retrievers import make_retriever
 from agents.knowledge_base_agent.prompts import TEXT2SQL_SYSTEM, build_text2sql_user_prompt
 
+
 def _summarize_docs(docs) -> list[dict[str, Any]]:
     """返回普通list[dict]"""
     out = []
     for i, d in enumerate(docs, 1):
-        out.append({
-            "id": d.metadata.get("id", f"doc-{i}"),
-            "doc_type": d.metadata.get("doc_type"),
-            "database": d.metadata.get("database"),
-            "table_name": d.metadata.get("table_name"),
-            "source": d.metadata.get("source", "Unknown"),
-            "content": d.page_content,
-            "sql": d.metadata.get("sql")
-        })
+        out.append(
+            {
+                "id": d.metadata.get("id", f"doc-{i}"),
+                "doc_type": d.metadata.get("doc_type"),
+                "database": d.metadata.get("database"),
+                "table_name": d.metadata.get("table_name"),
+                "source": d.metadata.get("source", "Unknown"),
+                "content": d.page_content,
+                "sql": d.metadata.get("sql"),
+            }
+        )
     return out
+
 
 async def resolve_target_db(state: AgentState, config: RunnableConfig) -> AgentState:
     # 优先从 configurable 传入（例如前端选择了数据库）
@@ -29,6 +33,7 @@ async def resolve_target_db(state: AgentState, config: RunnableConfig) -> AgentS
     if not db:
         db = os.getenv("DEFAULT_DB", "")
     return {"target_db": db}
+
 
 async def retrieve_sql_schema(state: AgentState, config: RunnableConfig) -> AgentState:
     """
@@ -49,6 +54,7 @@ async def retrieve_sql_schema(state: AgentState, config: RunnableConfig) -> Agen
     docs = await retriever.ainvoke(query)
     return {"sql_schema_docs": _summarize_docs(docs)}
 
+
 async def retrieve_sql_examples(state: AgentState, config: RunnableConfig) -> AgentState:
     """
     获取自然语言 -> sql的示例
@@ -68,6 +74,7 @@ async def retrieve_sql_examples(state: AgentState, config: RunnableConfig) -> Ag
     docs = await retriever.ainvoke(query)
     return {"sql_example_docs": _summarize_docs(docs)}
 
+
 async def prepare_sql_context(state: AgentState, config: RunnableConfig) -> AgentState:
     schema = state.get("sql_schema_docs", [])
     ex = state.get("sql_example_docs", [])
@@ -75,17 +82,20 @@ async def prepare_sql_context(state: AgentState, config: RunnableConfig) -> Agen
     parts = []
     parts.append("## SCHEMA / DDL / DESCRIPTION")
     for i, d in enumerate(schema, 1):
-        parts.append(f"--- SCHEMA {i} (type={d.get('doc_type')}, table={d.get('table_name')}) ---\n{d.get('content','')}")
+        parts.append(
+            f"--- SCHEMA {i} (type={d.get('doc_type')}, table={d.get('table_name')}) ---\n{d.get('content', '')}"
+        )
 
     parts.append("\n## FEW-SHOT QSQL EXAMPLES")
     for i, d in enumerate(ex, 1):
         parts.append(
             f"--- EXAMPLE {i} ---\n"
-            f"Question: {d.get('content','')}\n"
-            f"SQL: {d.get('sql','(missing)')}"
+            f"Question: {d.get('content', '')}\n"
+            f"SQL: {d.get('sql', '(missing)')}"
         )
 
     return {"sql_context": "\n\n".join(parts)}
+
 
 async def generate_sql(state: AgentState, config: RunnableConfig) -> AgentState:
     m = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
@@ -99,10 +109,16 @@ async def generate_sql(state: AgentState, config: RunnableConfig) -> AgentState:
         sql_context=state.get("sql_context", ""),
     )
 
-    resp = await m.ainvoke([
-        SystemMessage(content=TEXT2SQL_SYSTEM),
-        HumanMessage(content=user_prompt),
-    ])
+    resp = await m.ainvoke(
+        [
+            SystemMessage(content=TEXT2SQL_SYSTEM),
+            HumanMessage(content=user_prompt),
+        ]
+    )
 
-    # 你可以要求模型“只输出 SQL”，则这里直接当 SQL
-    return {"messages": [], "generated_sql": resp.content}
+    # 你可以要求模型"只输出 SQL"，则这里直接当 SQL
+    return {
+        "messages": [],
+        "generated_sql": resp.content,
+        "sql_trace_id": str(resp.id),
+    }

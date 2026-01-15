@@ -10,10 +10,15 @@ from agents.knowledge_base_agent.sql_utils import extract_sql, ensure_limit, to_
 from agents.knowledge_base_agent.prompts import REPAIR_SYSTEM, build_repair_sql_prompt
 from agents.knowledge_base_agent.sql_validator import validate_sql_
 from agents.knowledge_base_agent.sql_executor import execute_select
+from evaluation import EvaluationManager, ExecutionSuccessEvaluator
+
+
+evaluation_manager = EvaluationManager()
+evaluation_manager.register(ExecutionSuccessEvaluator())
 
 
 async def repair_sql(state: AgentState, config: RunnableConfig) -> AgentState:
-    """ 使用 llm 修复语义错误的 SQL 语句"""
+    """使用 llm 修复语义错误的 SQL 语句"""
     m = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
     dialect = state.get("sql_dialect", "")
 
@@ -23,16 +28,18 @@ async def repair_sql(state: AgentState, config: RunnableConfig) -> AgentState:
 
     prompt = build_repair_sql_prompt(ctx=ctx, bad_sql=bad_sql, dialect=dialect, error=error)
 
-    resp = await m.ainvoke([
-        SystemMessage(content=REPAIR_SYSTEM),
-        HumanMessage(content=prompt),
-    ])
+    resp = await m.ainvoke(
+        [
+            SystemMessage(content=REPAIR_SYSTEM),
+            HumanMessage(content=prompt),
+        ]
+    )
 
     fixed = extract_sql(resp.content)
     return {
-        "generated_sql": fixed,   # 用 generated_sql 覆盖成新版本
+        "generated_sql": fixed,  # 用 generated_sql 覆盖成新版本
         "sql_attempt": state.get("sql_attempt", 0) + 1,
-        "messages": [],           # 修复中间不直接回复用户
+        "messages": [],  # 修复中间不直接回复用户
     }
 
 
@@ -74,11 +81,16 @@ async def execute_sql(state: AgentState, config: RunnableConfig) -> AgentState:
     timeout_s = int(os.getenv("TIMEOUT_S", "10"))
     result = await loop.run_in_executor(
         None,  # 默认线程池
-        lambda: execute_select(sql, timeout_s=timeout_s, max_rows=limit)
+        lambda: execute_select(sql, timeout_s=timeout_s, max_rows=limit),
     )
 
     if not result.ok:
-        return {"sql_exec_error": result.error, "sql_exec_rows": [], "sql_exec_columns": [], "sql_exec_rowcount": 0}
+        return {
+            "sql_exec_error": result.error,
+            "sql_exec_rows": [],
+            "sql_exec_columns": [],
+            "sql_exec_rowcount": 0,
+        }
 
     return {
         "sql_exec_error": "",
@@ -88,13 +100,42 @@ async def execute_sql(state: AgentState, config: RunnableConfig) -> AgentState:
         "validated_sql": sql,  # 把加了limit的版本存下来
     }
 
+
 async def format_sql_result(state: AgentState, config: RunnableConfig) -> AgentState:
+    trace_id = state.get("sql_trace_id")
+
     if state.get("sql_exec_error"):
         # 这里也可以选择交给 repair_sql 再试一次（见下方 graph）
         msg = f"执行SQL失败: {state['sql_exec_error']}\n\n```sql\n{state.get('validated_sql') or state.get('generated_sql')}\n```"
+
+        if trace_id:
+            evaluation_manager.evaluate_all(
+                output="",
+                context={
+                    "trace_id": trace_id,
+                    "sql_exec_error": state.get("sql_exec_error"),
+                },
+            )
+
         return {"messages": [AIMessage(content=msg)]}
-    
-    
+
+    cols = state.get("sql_exec_columns", [])
+    rows = state.get("sql_exec_rows", [])
+    sql = state.get("validated_sql") or state.get("generated_sql") or ""
+
+    table = to_markdown_table(cols, rows)
+    msg = f"```sql\n{sql}\n```\n\n查询结果(最多返回 {len(rows)} 行）：\n\n{table}"
+
+    if trace_id:
+        evaluation_manager.evaluate_all(
+            output="",
+            context={
+                "trace_id": trace_id,
+                "sql_exec_error": "",
+            },
+        )
+
+    return {"messages": [AIMessage(content=msg)]}
 
     cols = state.get("sql_exec_columns", [])
     rows = state.get("sql_exec_rows", [])
@@ -104,7 +145,9 @@ async def format_sql_result(state: AgentState, config: RunnableConfig) -> AgentS
     msg = f"```sql\n{sql}\n```\n\n查询结果(最多返回 {len(rows)} 行）：\n\n{table}"
     return {"messages": [AIMessage(content=msg)]}
 
-MAX_ATTEMPTS = 5 
+
+MAX_ATTEMPTS = 5
+
 
 def should_repair_after_validate(state: AgentState):
     if not state.get("sql_validation_error"):
@@ -119,6 +162,7 @@ def should_repair_after_validate(state: AgentState):
 
     return "maxed"
 
+
 def should_repair_after_exec(state: AgentState) -> str:
     if not state.get("sql_exec_error"):
         return "ok"
@@ -129,13 +173,14 @@ def should_repair_after_exec(state: AgentState) -> str:
 
     return "maxed"
 
+
 async def mark_not_select(state: AgentState, config: RunnableConfig) -> AgentState:
     return {"termination_reason": "not_select", "messages": []}
+
 
 async def mark_validate_max(state: AgentState, config: RunnableConfig) -> AgentState:
     return {"termination_reason": "validate_max", "messages": []}
 
+
 async def mark_exec_max(state: AgentState, config: RunnableConfig) -> AgentState:
     return {"termination_reason": "exec_max", "messages": []}
-
-            

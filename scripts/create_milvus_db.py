@@ -403,11 +403,11 @@ if __name__ == "__main__":
     # for i, doc in enumerate(results, start=1):
     #     print(f"\n🔹 Result {i}:\n{doc.page_content}\nTags: {doc.metadata}")
 
-    # sql_store = cerate_milvus_sql_db(
-    #     folder_path=folder_path,
-    #     collection_name=os.getenv("MILVUS_SQL_COLLECTION", "knowledge_base_sql"),
-    #     drop_if_exists=True,
-    # )
+    sql_store = cerate_milvus_sql_db(
+        folder_path=folder_path,
+        collection_name=os.getenv("MILVUS_SQL_COLLECTION", "knowledge_base_sql"),
+        drop_if_exists=True,
+    )
 
     # # 只查 schema/ddl
     # sql_retriever = sql_store.as_retriever(search_kwargs={

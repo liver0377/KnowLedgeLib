@@ -41,12 +41,20 @@
 
 ---
 
-### 4) rag_retrieved_relevance
-- **评估类型**: 👤 需人工标注
-- **实现方式**: 需要人工评估检索结果与问题的语义相关性
-- **实现状态**: 暂未实现
+### 4) rag_retrieved_relevance 🚀
+- **评估类型**: ✅ 自动化 - LLM-as-a-Judge
+- **实现方式**: 使用 LLM 评估检索结果与问题的相关性
+- **实现状态**: ✅ 已实现 (`RetrievalRelevanceEvaluator`)
 - **数据类型**: NUMERIC（数值）
 - **取值范围**: 1–5
+- **推荐模型**: qwen-plus
+- **适用场景**: RAG 问答
+- **评分标准**:
+  - 1: 几乎无关
+  - 2: 少量沾边，大多噪声
+  - 3: 主题相关但关键细节缺失
+  - 4: 大多相关，少量噪声
+  - 5: 高度相关，覆盖关键点
 
 ---
 
@@ -72,34 +80,41 @@
 
 ---
 
-### 7) rag_answer_helpfulness
-- **评估类型**: 🚀 可自动化 - LLM-as-a-Judge
+### 7) rag_answer_helpfulness 🚀
+- **评估类型**: ✅ 自动化 - LLM-as-a-Judge
 - **实现方式**: 使用 LLM 评估回答的有用性和可执行性
-- **实现状态**: 暂未实现
+- **实现状态**: ✅ 已实现 (`AnswerHelpfulnessEvaluator`)
 - **数据类型**: NUMERIC（数值）
 - **取值范围**: 1–5
+- **推荐模型**: qwen-plus
+- **适用场景**: RAG 问答
+- **评分标准**:
+  - 1: 毫无帮助，答非所问
+  - 2: 提供少量信息但不完整
+  - 3: 提供基本信息但缺乏深度
+  - 4: 提供有用的答案但需补充
+  - 5: 完全满足需求，可直接执行
 
 ---
 
-### 8) rag_answer_correctness
-- **评估类型**: 🚀 可自动化 - LLM-as-a-Judge
-- **实现方式**: 使用 LLM 评估回答的准确性和完整性
-- **实现状态**: 暂未实现
-- **数据类型**: NUMERIC（数值）
-- **取值范围**: 1–5
-
----
-
-### 9) rag_groundedness
-- **评估类型**: 🚀 可自动化 - LLM-as-a-Judge
+### 8) rag_groundedness 🚀
+- **评估类型**: ✅ 自动化 - LLM-as-a-Judge
 - **实现方式**: 使用 LLM 评估是否存在编造或与引用矛盾
-- **实现状态**: 暂未实现
+- **实现状态**: ✅ 已实现 (`GroundednessEvaluator`)
 - **数据类型**: NUMERIC（数值）
 - **取值范围**: 1–5
+- **推荐模型**: qwen-plus
+- **适用场景**: RAG 问答
+- **评分标准**:
+  - 1: 完全编造或与引用矛盾
+  - 2: 大量编造，缺乏引用支持
+  - 3: 部分内容无依据
+  - 4: 基本有据可查，少量超出
+  - 5: 严格基于引用，无编造
 
 ---
 
-### 10) rag_citation_present ✅
+### 9) rag_citation_present ✅
 - **评估类型**: ✅ 自动化 - 规则检测
 - **实现方式**: 正则表达式检测 Markdown 引用链接
 - **实现状态**: ✅ 已实现 (`CitationEvaluator`)
@@ -109,7 +124,7 @@
 
 ---
 
-### 11) rag_citation_correct 🚀
+### 10) rag_citation_correct 🚀
 - **评估类型**: ✅ 自动化 - LLM-as-a-Judge
 - **实现方式**: 使用 LLM 评估引用是否真实有效且支持回答
 - **实现状态**: ✅ 已实现 (`CitationCorrectnessEvaluator`)
@@ -120,16 +135,17 @@
   - 引用是否真实存在
   - 引用内容是否支持回答结论
 
----
-
 ## 二、Text2SQL
 
 ### 1) execution_success
 - **评估类型**: ✅ 自动化 - 执行结果
 - **实现方式**: 捕获 SQL 执行结果
-- **实现状态**: 暂未实现
+- **实现状态**: ✅ 已实现 (`ExecutionSuccessEvaluator`)
 - **数据类型**: BOOLEAN（是/否）
 - **说明**: SQL 能否在目标库/沙箱里成功执行
+- **评分规则**:
+  - 执行成功 (score=1.0): sql_exec_error 为空
+  - 执行失败 (score=0.0): sql_exec_error 有值
 
 ---
 
@@ -207,18 +223,18 @@
 | `rag_citation_present` | 规则检测 | RAG | `citation_evaluator.py` |
 | `rag_needs_clarification` | 规则检测 | RAG | `needs_clarification_evaluator.py` |
 | `safety_risk` | 规则检测 | SQL | `safety_risk_evaluator.py` |
+| `execution_success` | 执行结果 | SQL | `execution_success_evaluator.py` |
 | `rag_citation_correct` | LLM-as-a-Judge | RAG | `citation_correctness_evaluator.py` |
+| `rag_retrieved_relevance` | LLM-as-a-Judge | RAG | `retrieval_relevance_evaluator.py` |
+| `rag_answer_helpfulness` | LLM-as-a-Judge | RAG | `answer_helpfulness_evaluator.py` |
+| `rag_groundedness` | LLM-as-a-Judge | RAG | `groundedness_evaluator.py` |
 
 ### 🚀 可实现但未实现
 
 | 评估器 | 类型 | 优先级 | 难度 |
-|--------|------|--------|------|
-| `rag_answer_correctness` | LLM | 高 | 中 |
-| `rag_groundedness` | LLM | 高 | 中 |
-| `rag_answer_helpfulness` | LLM | 中 | 低 |
+|--------|------|--------|--------|
 | `sql_readability` | LLM | 中 | 中 |
 | `result_correct` | LLM | 中 | 高 |
-| `execution_success` | 执行结果 | 高 | 低 |
 | `sql_error_type` | 异常捕获 | 中 | 低 |
 
 ### 👤 需人工评估
@@ -228,7 +244,6 @@
 | `rag_retrieval_problem` | 需要专家分析检索流程 |
 | `rag_top1_is_best` | 需要人工标注正确答案 |
 | `rag_context_sufficiency` | 主观性强，需要人工判断 |
-| `rag_retrieved_relevance` | 需要语义相关性评估 |
 | `rag_issue_type` | 需要人工分类问题类型 |
 | `uses_correct_tables` | 需要业务知识评估 |
 | `needs_clarification` (SQL) | 需要人工判断问题清晰度 |

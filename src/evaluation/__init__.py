@@ -6,6 +6,7 @@ from .citation_evaluator import (
     evaluate_citation_present_with_details,
     record_citation_score,
 )
+from .execution_success_evaluator import ExecutionSuccessEvaluator
 from .manager import EvaluationManager
 from .needs_clarification_evaluator import NeedsClarificationEvaluator
 from .safety_risk_evaluator import SafetyRiskEvaluator
@@ -15,6 +16,7 @@ __all__ = [
     "CitationCorrectnessEvaluator",
     "CitationEvaluator",
     "EvaluationManager",
+    "ExecutionSuccessEvaluator",
     "NeedsClarificationEvaluator",
     "SafetyRiskEvaluator",
     "evaluate_citation_present",
