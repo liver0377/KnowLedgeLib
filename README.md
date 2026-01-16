@@ -31,8 +31,8 @@
 
 - Python 3.10+
 - Node.js 18+
+- Mysql 8.0+
 - Docker & Docker Compose
-- MySQL 8.0+
 - Milvus 2.3+
 
 ## 🚀 快速开始
@@ -84,8 +84,21 @@ cp .env.example .env
 OPENAI_API_KEY=your_openai_api_key
 # 或使用其他 LLM 提供商
 
-# 数据库配置
-DATABASE_URL=mysql+aiomysql://user:password@localhost:3306/knowledgelib
+# 数据库配置（Docker）
+# 使用 Docker Compose 启动时，数据库连接由 infra 目录下的配置管理
+# PostgreSQL（推荐用于生产环境）
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_USER=liver0377
+POSTGRES_PASSWORD=sq17273747
+POSTGRES_DB=knowledgelib
+
+# MySQL（权限管理用）
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=rootpass
+MYSQL_DATABASE=knowledge_lib
 
 # Milvus 配置
 MILVUS_HOST=localhost
@@ -103,61 +116,54 @@ LANGFUSE_HOST=https://cloud.langfuse.com
 LANGFUSE_AUTO_EVAL=true
 ```
 
-### 3. 启动 MySQL 服务
+### 3. 启动数据库服务（Docker）
 
-#### 使用 Docker 启动 MySQL
+项目在 `infra` 目录下分别配置了各个数据库服务，包括 MySQL、PostgreSQL 和 Milvus。
 
-```bash
-# 创建数据目录
-mkdir -p data/mysql
-
-# 启动 MySQL
-docker run -d \
-  --name mysql-server \
-  -e MYSQL_ROOT_PASSWORD=rootpassword \
-  -e MYSQL_DATABASE=knowledgelib \
-  -e MYSQL_USER=knowledgelib \
-  -e MYSQL_PASSWORD=knowledgelib123 \
-  -p 3306:3306 \
-  -v $(pwd)/data/mysql:/var/lib/mysql \
-  mysql:8.0
-```
-
-或使用 Docker Compose：
+#### 启动 Milvus（向量数据库）
 
 ```bash
-# 使用 compose.yaml 启动
-docker compose up -d mysql
+cd infra/milvus
+docker compose up -d
 ```
 
-#### 本地安装 MySQL
+Milvus 服务包括：
+- **etcd**: 元数据存储
+- **minio**: 对象存储（用于 Milvus）
+- **standalone**: Milvus 核心服务
 
-如果使用本地 MySQL，确保已安装并启动服务：
+服务访问地址：
+- **Milvus API**: `localhost:19530`
+- **MinIO Console**: `http://localhost:9001`
+- **健康检查**: `http://localhost:19530/healthz`
+
+#### 启动 PostgreSQL（推荐用于生产环境）
 
 ```bash
-# Ubuntu/Debian
-sudo apt-get install mysql-server
-sudo systemctl start mysql
-
-# macOS
-brew install mysql
-brew services start mysql
-
-# Windows
-# 下载并安装 MySQL Installer
+cd infra/postgres
+docker compose up -d
 ```
 
-### 4. 启动 Milvus 服务
+服务访问地址：
+- **PostgreSQL**: `localhost:5432`
+  - 用户名: `liver0377`
+  - 密码: `sq17273747`
+  - 数据库: `knowledgelib`
 
-#### 使用 Docker 启动 Milvus
+#### 启动 MySQL
 
 ```bash
-# 下载 Milvus Compose 文件
-wget https://github.com/milvus-io/milvus/releases/download/v2.3.4/milvus-standalone-docker-compose.yml -O docker-compose-milvus.yml
-
-# 启动 Milvus
-docker compose -f docker-compose-milvus.yml up -d
+cd infra/mysql
+docker compose up -d
 ```
+
+服务访问地址：
+- **MySQL**: `localhost:3306`
+  - 用户名: `root`
+  - 密码: `rootpass`
+  - 数据库: `knowledge_lib`
+
+### 4. 验证数据库服务
 
 #### 验证 Milvus 运行状态
 
@@ -168,48 +174,91 @@ curl http://localhost:19530/healthz
 # 应返回：{"status":"ok"}
 ```
 
-### 5. 导入数据库数据
+#### 验证 PostgreSQL 连接
 
-#### 创建数据库表结构
+```bash
+# 连接测试
+docker exec -it langgraph-pg psql -U liver0377 -d knowledgelib
+```
+
+#### 验证 MySQL 连接
+
+```bash
+# 连接测试
+docker exec -it knowledge-mysql mysql -u root -prootpass
+```
+
+### 5. 准备向量数据库数据（Text2SQL）
+
+在创建 Milvus 集合之前，需要确保 `data/` 目录下有以下文件：
+
+#### 必需文件
+
+- **`data/db_descriptions.json`**: 数据库表的描述信息
+- **`data/ddl_examples.json`**: 数据库表的 DDL 示例
+- **`data/qsql_examples.json`**: SQL 查询的示例
+
+#### 可选文件
+
+- **`data/AI/`**: AI 相关文档（PDF格式）
+- **`data/database/`**: 数据库文档（PDF格式）
+- **`data/micro_service/`**: 微服务文档（PDF格式）
+
+这些文件会被 `scripts/create_milvus_db.py` 读取并导入到 Milvus 向量数据库。
+
+
+
+### 6. 初始化数据库表结构
+
+#### 初始化 MySQL 数据库（权限管理用）
 
 ```bash
 # 确保已激活虚拟环境
 source .venv/bin/activate
 
-# 执行初始化脚本
-python scripts/create_chroma_db.py
+# 使用 docker-compose 在 MySQL 容器中执行 SQL 脚本
+cd infra/mysql
+docker compose exec -T mysql mysql -uroot -prootpass knowledge_lib < ../../scripts/rbac_schema.sql
+
+# 导入 RBAC 初始数据
+docker compose exec -T mysql mysql -uroot -prootpass knowledge_lib < ../../scripts/rbac_seed_data.sql
+
+# 导入 Text2SQL 相关表
+docker compose exec -T mysql mysql -uroot -prootpass knowledge_lib < ../../scripts/text2sql_schema.sql
+
+# 导入 Text2SQL 初始数据
+docker compose exec -T mysql mysql -uroot -prootpass knowledge_lib < ../../scripts/text2sql_seed_data.sql
 ```
 
-或手动执行 SQL：
+该脚本会：
+- 连接到 Docker 容器中的 MySQL 数据库
+- 创建 RBAC 权限表结构（users, roles, departments, user_departments 等）
+- 导入 Text2SQL 相关表结构
+- 导入初始数据（默认角色、示例数据等）
+
+
+
+### 8. 创建 Milvus 集合
 
 ```bash
-# 登录 MySQL
-mysql -u knowledgelib -p
+# 确保已激活虚拟环境
+source .venv/bin/activate
 
-# 执行建表脚本
-source scripts/schema.sql
-
-# 执行 RBAC 权限表
-source scripts/rbac_schema.sql
-
-# 导入初始数据
-source scripts/insert.sql
-source scripts/rbac_seed_data.sql
+# 创建文档检索集合
+python scripts/create_milvus_db.py
 ```
 
-#### 数据库结构说明
+该脚本会：
+1. 读取 `data/` 目录下的 JSON 文件（`db_descriptions.json`、`ddl_examples.json`、`qsql_examples.json`）
+2. 连接到 Milvus 服务（`localhost:19530`）
+3. 创建两个集合：
+   - `knowledge_base_doc`: 文档检索集合
+   - `knowledge_base_sql`: SQL 查询集合
+4. 配置索引和参数（embedding 维度、距离度量等）
 
-- **users**: 用户表
-- **roles**: 角色表
-- **departments**: 部门表
-- **user_departments**: 用户-部门关联表（包含权限信息）
-- **user_roles**: 用户-角色关联表
-- **kb_files**: 知识库文件表
-- **files**: 文件存储表
 
-详细表结构请参考 `docs/数据库设计.md` 和 `docs/RBAC数据库迁移说明.md`
 
-### 6. 导入文档到向量数据库
+### 9. 导入文档到向量数据库
 
 #### 使用脚本导入
 
@@ -222,11 +271,11 @@ python scripts/insert.py
 ```
 
 该脚本会：
-1. 读取 `data/` 目录下的所有 PDF 文档
+1. 读取 `data/AI/`、`data/database/`、`data/micro_service/` 目录下的所有 PDF 文档
 2. 使用 PDF 解析器提取文本内容
 3. 分割文本为 chunks
 4. 生成 embedding 向量
-5. 存储到 Milvus 向量数据库
+5. 存储到 Milvus 文档集合（`knowledge_base_doc`）
 
 #### 手动添加文档
 
@@ -237,12 +286,19 @@ python scripts/insert.py
 4. 点击"上传文件"
 5. 选择 PDF 文件并上传
 
-### 7. 启动前后端服务
+上传的文件会被：
+1. 解析文本内容
+2. 分割为 chunks
+3. 生成 embedding 向量
+4. 存储到 Milvus 向量数据库
+5. 按部门分类存储
+
+### 8. 启动应用服务
 
 #### 使用 Docker Compose 启动（推荐）
 
 ```bash
-# 启动所有服务
+# 启动所有服务（PostgreSQL + 后端 + 前端）
 docker compose up
 
 # 或使用 watch 模式（开发时自动更新）
@@ -262,7 +318,7 @@ docker compose watch
 # 激活虚拟环境
 source .venv/bin/activate
 
-# 启动 FastAPI 服务
+# 启动 FastAPI 服务（会连接 PostgreSQL）
 python src/run_service.py
 ```
 
@@ -305,17 +361,29 @@ KnowLedgeLib/
 │   ├── agents/            # LangGraph Agents
 │   ├── client/            # 客户端封装
 │   ├── core/              # 核心模块（LLM、配置）
+│   ├── memory/            # 记忆系统（Checkpointer、Store）
 │   ├── service/           # FastAPI 服务
 │   └── run_service.py    # 服务入口
 ├── scripts/               # 脚本工具
-│   ├── create_chroma_db.py  # 创建数据库
-│   ├── insert.sql         # SQL 初始化脚本
-│   └── insert.py         # 文档导入脚本
+│   ├── create_milvus_db.py  # 创建 Milvus 集合
+│   ├── rbac_schema.sql       # RBAC 表结构
+│   ├── rbac_seed_data.sql   # RBAC 初始数据
+│   ├── text2sql_schema.sql   # Text2SQL 表结构
+│   ├── text2sql_seed_data.sql # Text2SQL 初始数据
+│   └── insert.py            # 文档导入脚本
 ├── data/                  # 数据目录
-│   ├── AI/              # AI 部门文档
-│   ├── database/         # 数据库部门文档
-│   └── micro_service/    # 微服务部门文档
+│   ├── db_descriptions.json  # 数据库表描述
+│   ├── ddl_examples.json     # DDL 示例
+│   ├── qsql_examples.json    # SQL 查询示例
+│   ├── AI/                 # AI 相关文档（PDF）
+│   ├── database/           # 数据库文档（PDF）
+│   └── micro_service/     # 微服务文档（PDF）
+├── infra/                 # 基础设施配置
+│   ├── milvus/           # Milvus 配置（etcd、minio、standalone）
+│   ├── mysql/             # MySQL 配置（权限管理用）
+│   └── postgres/          # PostgreSQL 配置（记忆系统用）
 ├── docs/                  # 文档
+│   ├── 记忆系统.md
 │   ├── 权限控制.md
 │   ├── 数据库设计.md
 │   ├── UI界面.md
@@ -325,6 +393,8 @@ KnowLedgeLib/
 └── pyproject.toml        # Python 项目配置
 ```
 
+
+
 ## 🔐 权限管理说明
 
 系统实现了基于 RBAC 的权限控制，详细说明请参考 [docs/权限控制.md](docs/权限控制.md)。
@@ -332,6 +402,7 @@ KnowLedgeLib/
 ### 角色定义
 
 - **管理员 (admin)**: 拥有所有权限，不受部门限制
+- **数据分析师(analyst)**: 拥有rtext2sql的功能访问权限
 - **普通用户 (member)**: 需要通过部门配置访问权限
 
 ### 部门权限
@@ -417,15 +488,7 @@ docker compose up --build
 - [API 接口规定](docs/接口规定.md)
 - [RBAC 数据库迁移说明](docs/RBAC数据库迁移说明.md)
 
-## 🤝 贡献指南
 
-欢迎贡献！请遵循以下步骤：
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
 
 ## 📄 许可证
 
@@ -445,4 +508,3 @@ docker compose up --build
 - [FastAPI](https://fastapi.tiangolo.com/)
 - [Vue.js](https://vuejs.org/)
 - [Milvus](https://milvus.io/)
-- [ChromaDB](https://www.trychroma.com/)
