@@ -2,24 +2,24 @@ from langgraph.graph import END, StateGraph
 from agents.knowledge_base_agent.state import AgentState
 from agents.knowledge_base_agent.router import route_query
 
-from agents.knowledge_base_agent.nodes_doc import retrieve_documents, prepare_augmented_prompt, acall_model
+from agents.knowledge_base_agent.nodes_doc import (
+    retrieve_documents,
+    prepare_augmented_prompt,
+    acall_model,
+)
 from agents.knowledge_base_agent.nodes_text2sql import (
     resolve_target_db,
     retrieve_sql_schema,
     retrieve_sql_examples,
     prepare_sql_context,
-    generate_sql
+    generate_sql,
 )
 from agents.knowledge_base_agent.nodes_sql_runtime import (
     repair_sql,
     validate_sql,
-    execute_sql, 
+    execute_sql,
     format_sql_result,
-    should_repair_after_exec,
-    should_repair_after_validate,
-    mark_exec_max,
-    mark_not_select,
-    mark_validate_max
+    sql_transition,
 )
 
 
@@ -46,9 +46,7 @@ def build_graph():
     g.add_node("execute_sql", execute_sql)
     g.add_node("repair_sql", repair_sql)
     g.add_node("format_sql_result", format_sql_result)
-    g.add_node("mark_not_select", mark_not_select)
-    g.add_node("mark_validate_max", mark_validate_max)
-    g.add_node("mark_exec_max", mark_exec_max)
+    g.add_node("sql_transition", sql_transition)
 
     # entry
     g.set_entry_point("route_query")
@@ -64,24 +62,13 @@ def build_graph():
     )
 
     g.add_conditional_edges(
-        "validate_sql",
-        should_repair_after_validate,
+        "sql_transition",
+        lambda s: s.get("next_node", "format_sql_result"),
         {
-            "ok": "execute_sql",
-            "repair": "repair_sql",
-            "not_select": "mark_not_select",
-            "maxed": "mark_validate_max",
-        }
-    )
-
-    g.add_conditional_edges(
-        "execute_sql",
-        should_repair_after_exec,
-        {
-            "ok": "format_sql_result",
-            "repair": "repair_sql",
-            "maxed": "mark_exec_max",
-        }
+            "execute_sql": "execute_sql",
+            "repair_sql": "repair_sql",
+            "format_sql_result": "format_sql_result",
+        },
     )
 
     # doc flow
@@ -97,19 +84,19 @@ def build_graph():
 
     # sql executor flow
     g.add_edge("text2sql_model", "validate_sql")
+    g.add_edge("validate_sql", "sql_transition")
+    g.add_edge("execute_sql", "sql_transition")
     g.add_edge("repair_sql", "validate_sql")
-    g.add_edge("mark_not_select", "format_sql_result")
-    g.add_edge("mark_validate_max", "format_sql_result")
-    g.add_edge("mark_exec_max", "format_sql_result")
     g.add_edge("format_sql_result", END)
 
     agent = g.compile()
 
     g = agent.get_graph()
     png_bytes = g.draw_mermaid_png()
-    with open("docs/kb_agent.png", "wb") as f:
+    with open("assets/kb_agent.png", "wb") as f:
         f.write(png_bytes)
 
     return agent
+
 
 kb_agent = build_graph()

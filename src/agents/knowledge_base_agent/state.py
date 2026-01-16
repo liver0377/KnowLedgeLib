@@ -1,6 +1,16 @@
+from enum import Enum
 from typing import Any, Literal
 from langgraph.graph import MessagesState
 from langgraph.managed import RemainingSteps
+
+
+class SqlFlowState(str, Enum):
+    INIT = "init"
+    VALID_OK = "valid_ok"
+    VALID_NOT_SELECT = "valid_not_select"
+    VALID_ERROR = "valid_error"
+    EXEC_OK = "exec_ok"
+    EXEC_ERROR = "exec_error"
 
 
 class AgentState(MessagesState, total=False):
@@ -28,6 +38,8 @@ class AgentState(MessagesState, total=False):
     sql_exec_error: str
 
     sql_attempt: int  # 重试次数
+    sql_flow_state: SqlFlowState  # SQL流程状态
+    next_node: str  # 图路由用的临时字段
     termination_reason: str  # exec_ok/validate_max/exec_max/not_select/parse_error/exec_error
     sql_error_stage: str  # validate/execute
     sql_error_type: str  # not_select/parse_error/runtime_error

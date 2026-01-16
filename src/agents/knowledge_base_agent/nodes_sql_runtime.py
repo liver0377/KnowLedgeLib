@@ -5,7 +5,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from dataclasses import dataclass
 from langchain_core.runnables import RunnableConfig
 from core import get_model, settings
-from agents.knowledge_base_agent.state import AgentState
+from agents.knowledge_base_agent.state import AgentState, SqlFlowState
 from agents.knowledge_base_agent.sql_utils import extract_sql, ensure_limit, to_markdown_table
 from agents.knowledge_base_agent.prompts import REPAIR_SYSTEM, build_repair_sql_prompt
 from agents.knowledge_base_agent.sql_validator import validate_sql_
@@ -37,9 +37,13 @@ async def repair_sql(state: AgentState, config: RunnableConfig) -> AgentState:
 
     fixed = extract_sql(resp.content)
     return {
-        "generated_sql": fixed,  # 用 generated_sql 覆盖成新版本
+        "generated_sql": fixed,
         "sql_attempt": state.get("sql_attempt", 0) + 1,
-        "messages": [],  # 修复中间不直接回复用户
+        "sql_validation_error": "",
+        "sql_exec_error": "",
+        "sql_error_stage": "",
+        "sql_error_type": "",
+        "sql_flow_state": SqlFlowState.INIT,
     }
 
 
@@ -61,11 +65,11 @@ async def validate_sql(state: AgentState, config: RunnableConfig) -> AgentState:
     type_valid, type_error = check_sql_type_restrictions(sql)
     if not type_valid:
         return {
-            "sql_attempt": state.get("sql_attempt", 0) + 1,
             "validated_sql": "",
             "sql_validation_error": type_error,
             "sql_error_stage": "validate",
             "sql_error_type": "not_select",
+            "sql_flow_state": SqlFlowState.VALID_NOT_SELECT,
         }
 
     # 验证 LIMIT 子句（analyst 角色必须有限制）
@@ -78,11 +82,11 @@ async def validate_sql(state: AgentState, config: RunnableConfig) -> AgentState:
         limit_valid, limit_msg, limit_value = validate_sql_limit(sql, default_limit, max_limit)
         if not limit_valid:
             return {
-                "sql_attempt": state.get("sql_attempt", 0) + 1,
                 "validated_sql": "",
                 "sql_validation_error": limit_msg,
                 "sql_error_stage": "validate",
                 "sql_error_type": "parse_error",
+                "sql_flow_state": SqlFlowState.VALID_ERROR,
             }
 
     # 使用 sqlglot 进行规范化验证
@@ -93,11 +97,11 @@ async def validate_sql(state: AgentState, config: RunnableConfig) -> AgentState:
         error_type = "not_select" if "Only SELECT" in err else "parse_error"
 
         return {
-            "sql_attempt": state.get("sql_attempt", 0) + 1,
             "validated_sql": "",
             "sql_validation_error": err,
             "sql_error_stage": "validate",
             "sql_error_type": error_type,
+            "sql_flow_state": SqlFlowState.VALID_ERROR,
         }
 
     return {
@@ -105,6 +109,7 @@ async def validate_sql(state: AgentState, config: RunnableConfig) -> AgentState:
         "sql_validation_error": "",
         "sql_error_stage": "",
         "sql_error_type": "",
+        "sql_flow_state": SqlFlowState.VALID_OK,
     }
 
 
@@ -145,6 +150,7 @@ async def execute_sql(state: AgentState, config: RunnableConfig) -> AgentState:
             "sql_exec_rows": [],
             "sql_exec_columns": [],
             "sql_exec_rowcount": 0,
+            "sql_flow_state": SqlFlowState.EXEC_ERROR,
         }
 
     # 对查询结果进行脱敏处理
@@ -159,7 +165,8 @@ async def execute_sql(state: AgentState, config: RunnableConfig) -> AgentState:
         "sql_exec_rows": masked_rows,
         "sql_exec_columns": result.columns,
         "sql_exec_rowcount": result.rowcount,
-        "validated_sql": sql,  # 把加了limit的版本存下来
+        "validated_sql": sql,
+        "sql_flow_state": SqlFlowState.EXEC_OK,
     }
 
 
@@ -199,50 +206,51 @@ async def format_sql_result(state: AgentState, config: RunnableConfig) -> AgentS
 
     return {"messages": [AIMessage(content=msg)]}
 
-    cols = state.get("sql_exec_columns", [])
-    rows = state.get("sql_exec_rows", [])
-    sql = state.get("validated_sql") or state.get("generated_sql") or ""
-
-    table = to_markdown_table(cols, rows)
-    msg = f"```sql\n{sql}\n```\n\n查询结果(最多返回 {len(rows)} 行）：\n\n{table}"
-    return {"messages": [AIMessage(content=msg)]}
-
 
 MAX_ATTEMPTS = 5
 
 
-def should_repair_after_validate(state: AgentState):
-    if not state.get("sql_validation_error"):
-        return "ok"
-
-    if state.get("sql_error_type") == "not_select":
-        return "not_select"
-
+async def sql_transition(state: AgentState, config: RunnableConfig) -> AgentState:
+    """统一决策节点：根据 sql_flow_state 和 sql_attempt 决定下一步"""
+    flow_state = state.get("sql_flow_state")
     attempt = int(state.get("sql_attempt", 0) or 0)
-    if attempt < MAX_ATTEMPTS:
-        return "repair"
 
-    return "maxed"
+    termination_reason = None
 
+    if flow_state == SqlFlowState.VALID_OK:
+        next_node = "execute_sql"
 
-def should_repair_after_exec(state: AgentState) -> str:
-    if not state.get("sql_exec_error"):
-        return "ok"
+    elif flow_state == SqlFlowState.VALID_NOT_SELECT:
+        termination_reason = "not_select"
+        next_node = "format_sql_result"
 
-    attempt = int(state.get("sql_attempt", 0) or 0)
-    if attempt < MAX_ATTEMPTS:
-        return "repair"
+    elif flow_state == SqlFlowState.VALID_ERROR:
+        if attempt < MAX_ATTEMPTS:
+            next_node = "repair_sql"
+        else:
+            termination_reason = "validate_max"
+            next_node = "format_sql_result"
 
-    return "maxed"
+    elif flow_state == SqlFlowState.EXEC_OK:
+        termination_reason = "exec_ok"
+        next_node = "format_sql_result"
 
+    elif flow_state == SqlFlowState.EXEC_ERROR:
+        if attempt < MAX_ATTEMPTS:
+            next_node = "repair_sql"
+        else:
+            termination_reason = "exec_max"
+            next_node = "format_sql_result"
 
-async def mark_not_select(state: AgentState, config: RunnableConfig) -> AgentState:
-    return {"termination_reason": "not_select", "messages": []}
+    else:
+        termination_reason = "unknown"
+        next_node = "format_sql_result"
 
+    result = {
+        "next_node": next_node,
+    }
 
-async def mark_validate_max(state: AgentState, config: RunnableConfig) -> AgentState:
-    return {"termination_reason": "validate_max", "messages": []}
+    if termination_reason:
+        result["termination_reason"] = termination_reason
 
-
-async def mark_exec_max(state: AgentState, config: RunnableConfig) -> AgentState:
-    return {"termination_reason": "exec_max", "messages": []}
+    return result

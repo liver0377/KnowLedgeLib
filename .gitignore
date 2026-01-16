@@ -193,4 +193,4 @@ privatecredentials/*
 !privatecredentials/.gitkeep
 
 # milvus
-infra/
+infra/milvus/volumes

@@ -2,6 +2,7 @@ import os
 from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_core.documents import Document
 
 from core import get_model, settings
 from agents.knowledge_base_agent.state import AgentState
@@ -9,52 +10,109 @@ from agents.knowledge_base_agent.retrievers import make_retriever
 from agents.knowledge_base_agent.prompts import TEXT2SQL_SYSTEM, build_text2sql_user_prompt
 
 
-def _summarize_docs(docs) -> list[dict[str, Any]]:
-    """返回普通list[dict]"""
-    out = []
-    for i, d in enumerate(docs, 1):
-        out.append(
-            {
-                "id": d.metadata.get("id", f"doc-{i}"),
-                "doc_type": d.metadata.get("doc_type"),
-                "database": d.metadata.get("database"),
-                "table_name": d.metadata.get("table_name"),
-                "source": d.metadata.get("source", "Unknown"),
-                "content": d.page_content,
-                "sql": d.metadata.get("sql"),
-            }
-        )
-    return out
+# Constants
+SCHEMA_RETRIEVE_K = 6
+EXAMPLE_RETRIEVE_K = 3
+DEFAULT_COLLECTION = "knowledge_base_sql"
+DOCTYPE_DDL = "ddl"
+DOCTYPE_DESC = "description"
+DOCTYPE_QSQL = "qsql"
+DEFAULT_SOURCE = "Unknown"
+MISSING_SQL_LABEL = "(missing)"
+
+
+def _extract_user_question(state: AgentState) -> str:
+    """从 state 中提取最后一个 HumanMessage 的内容"""
+    human = next(
+        (m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)),
+        None,
+    )
+    return human.content if human else ""
+
+
+def _doc_to_dict(doc: Document, idx: int) -> dict[str, Any]:
+    """将单个 Document 转换为普通字典"""
+    meta = doc.metadata
+    return {
+        "id": meta.get("id", f"doc-{idx}"),
+        "doc_type": meta.get("doc_type"),
+        "database": meta.get("database"),
+        "table_name": meta.get("table_name"),
+        "source": meta.get("source", DEFAULT_SOURCE),
+        "content": doc.page_content,
+        "sql": meta.get("sql"),
+    }
+
+
+def _summarize_docs(docs: list[Document]) -> list[dict[str, Any]]:
+    """将 Document 列表转换为普通字典列表"""
+    return [_doc_to_dict(doc, i) for i, doc in enumerate(docs, 1)]
+
+
+def _build_metadata_filter(expr: str, db: str | None = None) -> str:
+    """为表达式添加数据库过滤条件"""
+    if not db:
+        return expr
+    return f'{expr} and metadata["database"] == "{db}"'
+
+
+def _build_schema_filter(db: str, allowed_tables: list[str] | None = None) -> str:
+    """构建 schema 检索的过滤表达式"""
+    base_expr = f'metadata["doc_type"] in ["{DOCTYPE_DDL}", "{DOCTYPE_DESC}"]'
+    expr = _build_metadata_filter(base_expr, db)
+
+    if allowed_tables:
+        table_filter = " or ".join([f'metadata["table_name"] == "{t}"' for t in allowed_tables])
+        expr += f" and ({table_filter})"
+
+    return expr
+
+
+def _build_example_filter(db: str) -> str:
+    """构建示例检索的过滤表达式"""
+    base_expr = f'metadata["doc_type"] == "{DOCTYPE_QSQL}"'
+    return _build_metadata_filter(base_expr, db)
+
+
+async def _retrieve_documents(
+    collection: str,
+    query: str,
+    k: int,
+    expr: str,
+) -> list[Document]:
+    """检索文档的通用函数"""
+    retriever = make_retriever(collection_name=collection, k=k, expr=expr)
+    return await retriever.ainvoke(query)
 
 
 async def resolve_target_db(state: AgentState, config: RunnableConfig) -> AgentState:
     """
     解析目标数据库，并验证用户权限
 
-    从 configurable 传入（例如前端选择了数据库），如果没有则使用默认数据库
+    优先从 configurable 传入（例如前端选择了数据库），如果没有则使用默认数据库
     检查用户是否有权限访问该数据库
     """
     from service.text2sql_permissions import should_use_analytics_views
 
-    # 获取用户上下文
     user_context = state.get("user_context", {})
+    configurable = config.get("configurable", {})
 
-    # 优先从 configurable 传入（例如前端选择了数据库）
-    db = config["configurable"].get("target_db") if "configurable" in config else None
-    if not db:
-        db = os.getenv("DEFAULT_DB", "")
+    db = configurable.get("target_db") or os.getenv("DEFAULT_DB", "")
 
-    # 检查 text2sql 权限
     can_use_text2sql = user_context.get("can_use_text2sql", False)
     if not can_use_text2sql:
-        return {"target_db": db, "error": "您没有使用 Text2SQL 的权限，请联系管理员"}
+        return {
+            "target_db": db,
+            "messages": [SystemMessage(content="您没有使用 Text2SQL 的权限，请联系管理员")],
+        }
 
-    # 检查数据库访问权限
     allowed_databases = user_context.get("text2sql_allowed_databases", [])
     if db not in allowed_databases:
-        return {"target_db": db, "error": f"您无权访问数据库: {db}"}
+        return {
+            "target_db": db,
+            "messages": [SystemMessage(content=f"您无权访问数据库: {db}")],
+        }
 
-    # 判断是否使用 analytics 视图
     use_analytics_views = should_use_analytics_views(
         user_context.get("roles", []), user_context.get("permissions", set())
     )
@@ -68,35 +126,26 @@ async def retrieve_sql_schema(state: AgentState, config: RunnableConfig) -> Agen
     """
     from service.text2sql_permissions import Text2SQLPermissionDAO
 
-    collection = os.getenv("MILVUS_COLLECTION_SQL", "knowledge_base_sql")
     db = state.get("target_db", "")
-
-    # 获取用户上下文
     user_context = state.get("user_context", {})
     roles = user_context.get("roles", [])
 
-    # 检查是否有错误
     if state.get("error"):
         return {"error": state["error"]}
 
-    expr = 'metadata["doc_type"] in ["ddl","description"]'
-    if db:
-        expr += f' and metadata["database"] == "{db}"'
-
-    # 获取允许访问的表列表（analyst 只能访问非敏感数据）
     allowed_tables = Text2SQLPermissionDAO.get_allowed_tables_for_user(db, roles)
+    table_filter = allowed_tables if "admin" not in roles else None
 
-    # 如果有表权限限制，添加过滤条件
-    if allowed_tables and "admin" not in roles:
-        table_filter = " or ".join([f'metadata["table_name"] == "{t}"' for t in allowed_tables])
-        expr += f" and ({table_filter})"
+    expr = _build_schema_filter(db, table_filter)
+    query = _extract_user_question(state)
 
-    retriever = make_retriever(collection_name=collection, k=6, expr=expr)
+    docs = await _retrieve_documents(
+        collection=os.getenv("MILVUS_COLLECTION_SQL", DEFAULT_COLLECTION),
+        query=query,
+        k=SCHEMA_RETRIEVE_K,
+        expr=expr,
+    )
 
-    human = next((m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None)
-    query = human.content if human else ""
-
-    docs = await retriever.ainvoke(query)
     return {"sql_schema_docs": _summarize_docs(docs)}
 
 
@@ -104,64 +153,82 @@ async def retrieve_sql_examples(state: AgentState, config: RunnableConfig) -> Ag
     """
     获取自然语言 -> sql的示例
     """
-    collection = os.getenv("MILVUS_COLLECTION_SQL", "knowledge_base_sql")
     db = state.get("target_db", "")
+    expr = _build_example_filter(db)
+    query = _extract_user_question(state)
 
-    expr = 'metadata["doc_type"] == "qsql"'
-    if db:
-        expr += f' and metadata["database"] == "{db}"'
+    docs = await _retrieve_documents(
+        collection=os.getenv("MILVUS_COLLECTION_SQL", DEFAULT_COLLECTION),
+        query=query,
+        k=EXAMPLE_RETRIEVE_K,
+        expr=expr,
+    )
 
-    retriever = make_retriever(collection_name=collection, k=3, expr=expr)
-
-    human = next((m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None)
-    query = human.content if human else ""
-
-    docs = await retriever.ainvoke(query)
     return {"sql_example_docs": _summarize_docs(docs)}
 
 
+def _format_schema_section(schema_docs: list[dict[str, Any]]) -> str:
+    """格式化 schema 部分"""
+    if not schema_docs:
+        return ""
+
+    parts = ["## SCHEMA / DDL / DESCRIPTION"]
+    for i, doc in enumerate(schema_docs, 1):
+        doc_type = doc.get("doc_type", "")
+        table_name = doc.get("table_name", "")
+        content = doc.get("content", "")
+        parts.append(f"--- SCHEMA {i} (type={doc_type}, table={table_name}) ---\n{content}")
+    return "\n\n".join(parts)
+
+
+def _format_example_section(example_docs: list[dict[str, Any]]) -> str:
+    """格式化示例部分"""
+    if not example_docs:
+        return ""
+
+    parts = ["## FEW-SHOT QSQL EXAMPLES"]
+    for i, doc in enumerate(example_docs, 1):
+        question = doc.get("content", "")
+        sql = doc.get("sql", MISSING_SQL_LABEL)
+        parts.append(f"--- EXAMPLE {i} ---\nQuestion: {question}\nSQL: {sql}")
+    return "\n\n".join(parts)
+
+
 async def prepare_sql_context(state: AgentState, config: RunnableConfig) -> AgentState:
-    schema = state.get("sql_schema_docs", [])
-    ex = state.get("sql_example_docs", [])
+    """
+    整合 schema 和示例，构建 SQL 生成的上下文
+    """
+    schema_docs = state.get("sql_schema_docs", [])
+    example_docs = state.get("sql_example_docs", [])
 
-    parts = []
-    parts.append("## SCHEMA / DDL / DESCRIPTION")
-    for i, d in enumerate(schema, 1):
-        parts.append(
-            f"--- SCHEMA {i} (type={d.get('doc_type')}, table={d.get('table_name')}) ---\n{d.get('content', '')}"
-        )
+    sections = [
+        _format_schema_section(schema_docs),
+        _format_example_section(example_docs),
+    ]
 
-    parts.append("\n## FEW-SHOT QSQL EXAMPLES")
-    for i, d in enumerate(ex, 1):
-        parts.append(
-            f"--- EXAMPLE {i} ---\n"
-            f"Question: {d.get('content', '')}\n"
-            f"SQL: {d.get('sql', '(missing)')}"
-        )
-
-    return {"sql_context": "\n\n".join(parts)}
+    return {"sql_context": "\n\n".join(s for s in sections if s)}
 
 
 async def generate_sql(state: AgentState, config: RunnableConfig) -> AgentState:
-    m = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
+    """
+    使用 LLM 生成 SQL 语句
+    """
+    model = get_model(config.get("configurable", {}).get("model") or settings.DEFAULT_MODEL)
 
-    human = next((m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None)
-    question = human.content if human else ""
-
+    question = _extract_user_question(state)
     user_prompt = build_text2sql_user_prompt(
         question=question,
         target_db=state.get("target_db", ""),
         sql_context=state.get("sql_context", ""),
     )
 
-    resp = await m.ainvoke(
+    resp = await model.ainvoke(
         [
             SystemMessage(content=TEXT2SQL_SYSTEM),
             HumanMessage(content=user_prompt),
         ]
     )
 
-    # 你可以要求模型"只输出 SQL"，则这里直接当 SQL
     return {
         "messages": [],
         "generated_sql": resp.content,

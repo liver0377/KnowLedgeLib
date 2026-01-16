@@ -1,0 +1,21 @@
+services:
+  pg:
+    image: postgres:17.7
+    container_name: langgraph-pg
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: liver0377 
+      POSTGRES_PASSWORD: sq17273747 
+      POSTGRES_DB: knowledgelib 
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U liver0377 -d knowledgelib"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
