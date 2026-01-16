@@ -10,6 +10,7 @@ import { marked } from "marked";
 
 // 配置 marked 选项
 marked.setOptions({
+  gfm: true, 
   breaks: false, // 使用标准 Markdown 规则（双换行符才是段落）
 });
 
@@ -50,7 +51,13 @@ type UiMessage = {
   toolCalls?: ToolCall[];
   toolResults?: Record<string, any>; // tool_call_id -> result
   _forceUpdate?: number; // 用于强制重新渲染
+  finalized?: boolean; 
 };
+
+function bump(msg: UiMessage) {
+  msg._forceUpdate = (msg._forceUpdate ?? 0) + 1;
+}
+
 
 const auth = useAuthStore();
 const route = useRoute();
@@ -215,17 +222,13 @@ async function scrollToBottom() {
 }
 
 function renderMarkdown(text: string): string {
-  if (!text) return '';
-  try {
-    // 预处理文本: 清理过多的连续空行,但保留段落分隔
-    // 将3个或更多连续换行符替换为2个换行符(标准段落分隔)
-    const cleanedText = text.replace(/\n{3,}/g, '\n\n');
-    return marked.parse(cleanedText) as string;
-  } catch (e) {
-    console.error('Markdown parsing error:', e);
-    return text;
-  }
+  if (!text) return "";
+  const normalized = text.replace(/\r\n/g, "\n");
+  const cleaned = normalized.replace(/\n{3,}/g, "\n\n");
+  return marked.parse(cleaned) as string;
 }
+
+
 
 function toUiMessage(m: ChatMsg): UiMessage {
   return {
@@ -363,7 +366,8 @@ async function send() {
     try {
     await streamChat(streamUrl, payload, async (ev) => {
       if (ev.type === "token") {
-        console.log("收到 token:", ev.content);
+        if (aiPlaceholder.finalized) return;
+        // console.log("收到 token:", ev.content);
         aiPlaceholder.content += ev.content;
         // 强制触发响应式更新
         aiPlaceholder._forceUpdate = (aiPlaceholder._forceUpdate || 0) + 1;
@@ -381,25 +385,29 @@ async function send() {
 
       if (ev.type === "message") {
         const m = ev.content as ChatMsg;
+ 
 
-        if (m.type === "ai") {
-          // 当使用 stream_tokens 时，完整的 message 事件会覆盖已累积的 token
-          // 只有当 content 为空时才覆盖，保留 token 累积的内容
-          if (typeof m.content === "string" && m.content.length > 0) {
-            // 如果已经累积了 token 内容，就不要覆盖了
-            if (!aiPlaceholder.content) {
-              aiPlaceholder.content = m.content;
-            }
-          } else if (m.content) {
-            if (!aiPlaceholder.content) {
-              aiPlaceholder.content = JSON.stringify(m.content, null, 2);
-            }
+      if (m.type === "ai") {
+        const incoming =
+          typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "", null, 2);
+
+        if (incoming) {
+          // ✅ 覆盖策略：更长就覆盖；或者你也可以加 contains("查询结果") / contains("| --- |") 这种特征判断
+          if (incoming.length >= aiPlaceholder.content.length) {
+            aiPlaceholder.content = incoming;
+            aiPlaceholder.finalized = true; // ✅ format_sql_result 这类最终消息建议锁定
+          } else if (!aiPlaceholder.content) {
+            aiPlaceholder.content = incoming;
           }
 
-          aiPlaceholder.runId = m.run_id;
-          aiPlaceholder.toolCalls = m.tool_calls || [];
-          aiPlaceholder.toolResults = aiPlaceholder.toolResults || {};
+          bump(aiPlaceholder); // ✅ 关键：不管怎样，内容变了就 bump
+          await nextTick();
         }
+
+        aiPlaceholder.runId = m.run_id;
+        aiPlaceholder.toolCalls = m.tool_calls || [];
+        aiPlaceholder.toolResults = aiPlaceholder.toolResults || {};
+      }
 
         if (m.type === "tool" && m.tool_call_id) {
           attachToolResult(m.tool_call_id, m.content);
@@ -554,7 +562,6 @@ onUnmounted(() => {
             <div 
               class="msg-content markdown-content" 
               v-else
-              :key="m._forceUpdate"
               v-html="renderMarkdown(m.content || '')"
             ></div>
 
@@ -1045,5 +1052,112 @@ onUnmounted(() => {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* ✅ Markdown 容器本身 */
+.markdown-content {
+  line-height: 1.7;
+  font-size: 14px;
+  color: #111827;
+}
+
+/* ✅ 基础排版 */
+.markdown-content :deep(p) {
+  margin: 0 0 10px;
+}
+
+.markdown-content :deep(h1),
+.markdown-content :deep(h2),
+.markdown-content :deep(h3) {
+  margin: 14px 0 8px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.markdown-content :deep(h1) { font-size: 18px; }
+.markdown-content :deep(h2) { font-size: 16px; }
+.markdown-content :deep(h3) { font-size: 15px; }
+
+/* ✅ 行内代码 */
+.markdown-content :deep(code) {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.06);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+}
+
+/* ✅ 代码块 */
+.markdown-content :deep(pre) {
+  margin: 10px 0 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #0b1020;
+  color: #e5e7eb;
+  overflow-x: auto;
+  line-height: 1.55;
+}
+
+.markdown-content :deep(pre code) {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  color: inherit;
+}
+
+/* ✅ 表格：带边框 + 圆角 + 横向滚动 */
+.markdown-content :deep(table) {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 10px 0 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+  display: block;          /* 关键：小屏表格可滚动 */
+  max-width: 100%;
+}
+
+.markdown-content :deep(thead th) {
+  background: #f9fafb;
+  font-weight: 700;
+}
+
+.markdown-content :deep(th),
+.markdown-content :deep(td) {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+}
+
+.markdown-content :deep(tr:last-child td) {
+  border-bottom: none;
+}
+
+.markdown-content :deep(tr:nth-child(even) td) {
+  background: #fcfcfd;
+}
+
+/* ✅ 引用/分割线/链接 */
+.markdown-content :deep(blockquote) {
+  margin: 8px 0 12px;
+  padding: 8px 12px;
+  border-left: 4px solid #6366f1;
+  background: #f8fafc;
+  color: #475569;
+  border-radius: 8px;
+}
+
+.markdown-content :deep(hr) {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 14px 0;
+}
+
+.markdown-content :deep(a) {
+  color: #4f46e5;
+  text-decoration: underline;
+}
+
+
 </style>
 ```

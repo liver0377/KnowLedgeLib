@@ -5,6 +5,7 @@
 """
 
 import time
+import os
 from typing import Any, Callable, TypedDict, Optional
 from threading import Lock
 from functools import lru_cache
@@ -218,6 +219,7 @@ class UserContext(TypedDict):
     roles: list[str]
     allowed_dept_keys: list[str]
     permissions: set[str]
+    target_db: str
     can_use_text2sql: bool
     text2sql_allowed_databases: list[str]
 
@@ -249,12 +251,18 @@ def get_user_context(user: dict[str, Any] = Depends(get_current_user)) -> UserCo
         allowed_dept_keys = []
 
     # 检查 text2sql 权限
+    # print(f"permissions: {permissions}")
+
     can_use_text2sql = "text2sql:use" in permissions
+
+    # print(f"can_use_text2sql (get_user_context): {can_use_text2sql}")
     text2sql_allowed_databases = get_allowed_databases_for_user(roles, permissions)
+    target_db = os.getenv("TARGET_DB", "ecommerce")
 
     return {
         "user_id": user_id,
         "roles": roles,
+        "target_db": target_db,
         "allowed_dept_keys": allowed_dept_keys,
         "permissions": permissions,
         "can_use_text2sql": can_use_text2sql,

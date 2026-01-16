@@ -578,6 +578,7 @@ async def _handle_input(
     allowed_dept_keys = user.get("allowed_dept_keys", [])
     can_use_text2sql = user.get("can_use_text2sql", False)
     text2sql_allowed_databases = user.get("text2sql_allowed_databases", [])
+    target_db = user.get("target_db", "")
 
     configurable = {
         "thread_id": thread_id,
@@ -586,6 +587,7 @@ async def _handle_input(
         "allowed_dept_keys": allowed_dept_keys,
         "can_use_text2sql": can_use_text2sql,
         "text2sql_allowed_databases": text2sql_allowed_databases,
+        "target_db": target_db,
     }
 
     if user_input.model is not None:
@@ -691,7 +693,7 @@ async def message_generator(
     agent: AgentGraph = get_agent(agent_id)
     kwargs, run_id = await _handle_input(user_input, agent, user)
 
-    logger.info(f"Starting stream with stream_tokens={user_input.stream_tokens}")
+    logger.warning(f"Starting stream with stream_tokens={user_input.stream_tokens}")
 
     try:
         # Process streamed events from the graph and yield messages over the SSE stream.
@@ -710,10 +712,15 @@ async def message_generator(
 
             # When stream_tokens is enabled, skip updates/custom modes entirely
             # to avoid overwriting the token-by-token content
-            if user_input.stream_tokens and stream_mode in ["updates", "custom"]:
-                continue
+            # if user_input.stream_tokens and stream_mode in ["updates", "custom"]:
+            #     continue
 
             new_messages = []
+
+            #############################
+            # if stream_mode == "updates":
+            #     logger.warning(f"DEBUG: updates event - node={event.keys()}, event={event}")
+
             if stream_mode == "updates":
                 for node, updates in event.items():
                     # A simple approach to handle agent interrupts.
@@ -761,6 +768,9 @@ async def message_generator(
                         current_message = {}
                     processed_messages.append(message)
 
+            ######################################
+            # for message in processed_messages:
+            #     logger.warning(f"DEBUG: about to yield message - type={type(message)}, content={str(message)[:200]}")
             # Add any remaining message parts
             if current_message:
                 processed_messages.append(_create_ai_message(current_message))
@@ -776,6 +786,12 @@ async def message_generator(
                 # LangGraph re-sends the input message, which feels weird, so drop it
                 if chat_message.type == "human" and chat_message.content == user_input.message:
                     continue
+
+                ########################################
+                # msg, metadata = event
+                # logger.warning(f"DEBUG: messages mode event - msg type={type(msg)}, content type={type(msg.content)}")
+
+
                 yield f"data: {json.dumps({'type': 'message', 'content': chat_message.model_dump()})}\n\n"
 
             if stream_mode == "messages":

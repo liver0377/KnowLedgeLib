@@ -1,27 +1,62 @@
 [
   {
-    "table_name": "users",
-    "ddl_statement": "CREATE TABLE users (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(100) NOT NULL, email VARCHAR(150) UNIQUE, age INT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
-    "description": "用户信息表，存储用户基本信息"
+    "table_name": "regions",
+    "ddl_statement": "CREATE TABLE regions (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(100) NOT NULL, parent_id INT, level ENUM('country','province','city','district'), FOREIGN KEY (parent_id) REFERENCES regions(id))",
+    "description": "地区表，存储国家、省份、城市、区县等地理层级信息"
   },
   {
-    "table_name": "orders",
-    "ddl_statement": "CREATE TABLE orders (id INT PRIMARY KEY AUTO_INCREMENT, user_id INT, product_name VARCHAR(200), quantity INT, price DECIMAL(10,2), order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (user_id) REFERENCES users(id))",
-    "description": "订单表，存储用户订单信息"
+    "table_name": "addresses",
+    "ddl_statement": "CREATE TABLE addresses (id INT PRIMARY KEY AUTO_INCREMENT, user_id INT, region_id INT, detail VARCHAR(255), is_default BOOLEAN DEFAULT FALSE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (user_id) REFERENCES users(id), FOREIGN KEY (region_id) REFERENCES regions(id))",
+    "description": "用户地址表，存储用户的收货地址信息"
   },
   {
-    "table_name": "products",
-    "ddl_statement": "CREATE TABLE products (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(200) NOT NULL, category VARCHAR(100), price DECIMAL(10,2), stock INT DEFAULT 0, description TEXT)",
-    "description": "产品表，存储产品基本信息"
+    "table_name": "order_status_history",
+    "ddl_statement": "CREATE TABLE order_status_history (id INT PRIMARY KEY AUTO_INCREMENT, order_id INT, status ENUM('created','paid','shipped','delivered','cancelled','refunded'), changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (order_id) REFERENCES orders(id))",
+    "description": "订单状态历史表，记录订单状态变更历史"
   },
   {
-    "table_name": "categories",
-    "ddl_statement": "CREATE TABLE categories (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(100) NOT NULL UNIQUE, description TEXT)",
-    "description": "产品分类表"
+    "table_name": "payments",
+    "ddl_statement": "CREATE TABLE payments (id INT PRIMARY KEY AUTO_INCREMENT, order_id INT, payment_method ENUM('alipay','wechat','credit_card','paypal'), amount DECIMAL(10,2), payment_status ENUM('pending','success','failed'), paid_at TIMESTAMP, FOREIGN KEY (order_id) REFERENCES orders(id))",
+    "description": "支付表，记录订单的支付信息"
   },
   {
-    "table_name": "order_items",
-    "ddl_statement": "CREATE TABLE order_items (id INT PRIMARY KEY AUTO_INCREMENT, order_id INT, product_id INT, quantity INT, unit_price DECIMAL(10,2), FOREIGN KEY (order_id) REFERENCES orders(id), FOREIGN KEY (product_id) REFERENCES products(id))",
-    "description": "订单明细表，存储订单中的具体商品信息"
+    "table_name": "refunds",
+    "ddl_statement": "CREATE TABLE refunds (id INT PRIMARY KEY AUTO_INCREMENT, payment_id INT, refund_amount DECIMAL(10,2), refund_reason VARCHAR(255), refunded_at TIMESTAMP, FOREIGN KEY (payment_id) REFERENCES payments(id))",
+    "description": "退款表，记录订单的退款信息"
+  },
+  {
+    "table_name": "product_variants",
+    "ddl_statement": "CREATE TABLE product_variants (id INT PRIMARY KEY AUTO_INCREMENT, product_id INT, sku_code VARCHAR(100) UNIQUE, color VARCHAR(50), size VARCHAR(50), price DECIMAL(10,2), stock INT DEFAULT 0, FOREIGN KEY (product_id) REFERENCES products(id))",
+    "description": "产品变体表，存储产品的不同规格（如颜色、尺寸）"
+  },
+  {
+    "table_name": "inventory_logs",
+    "ddl_statement": "CREATE TABLE inventory_logs (id INT PRIMARY KEY AUTO_INCREMENT, variant_id INT, change_type ENUM('in','out','adjust'), quantity INT, changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (variant_id) REFERENCES product_variants(id))",
+    "description": "库存日志表，记录产品变体的库存变更历史"
+  },
+  {
+    "table_name": "suppliers",
+    "ddl_statement": "CREATE TABLE suppliers (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(200), contact_email VARCHAR(150))",
+    "description": "供应商表，存储产品供应商信息"
+  },
+  {
+    "table_name": "product_suppliers",
+    "ddl_statement": "CREATE TABLE product_suppliers (product_id INT, supplier_id INT, PRIMARY KEY (product_id, supplier_id), FOREIGN KEY (product_id) REFERENCES products(id), FOREIGN KEY (supplier_id) REFERENCES suppliers(id))",
+    "description": "产品供应商关联表，建立产品与供应商的多对多关系"
+  },
+  {
+    "table_name": "promotions",
+    "ddl_statement": "CREATE TABLE promotions (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(200), discount_type ENUM('percentage','fixed'), discount_value DECIMAL(10,2), start_date DATE, end_date DATE)",
+    "description": "促销活动表，定义各种促销活动的规则"
+  },
+  {
+    "table_name": "order_promotions",
+    "ddl_statement": "CREATE TABLE order_promotions (order_id INT, promotion_id INT, PRIMARY KEY (order_id, promotion_id), FOREIGN KEY (order_id) REFERENCES orders(id), FOREIGN KEY (promotion_id) REFERENCES promotions(id))",
+    "description": "订单促销关联表，记录订单应用的促销活动"
+  },
+  {
+    "table_name": "user_events",
+    "ddl_statement": "CREATE TABLE user_events (id INT PRIMARY KEY AUTO_INCREMENT, user_id INT, event_type ENUM('view','add_to_cart','search','purchase'), target VARCHAR(255), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (user_id) REFERENCES users(id))",
+    "description": "用户事件表，记录用户在平台上的各种行为事件"
   }
-] 
+]

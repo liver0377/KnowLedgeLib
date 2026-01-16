@@ -35,6 +35,7 @@ class DatabaseType(StrEnum):
     SQLITE = "sqlite"
     POSTGRES = "postgres"
     MONGO = "mongo"
+    MYSQL = "mysql"
 
 
 class LogLevel(StrEnum):
@@ -124,8 +125,13 @@ class Settings(BaseSettings):
     # Database Configuration
     DATABASE_TYPE: DatabaseType = (
         DatabaseType.SQLITE
-    )  # Options: DatabaseType.SQLITE or DatabaseType.POSTGRES
+    )  # Options: DatabaseType.SQLITE, DatabaseType.POSTGRES, DatabaseType.MONGO, DatabaseType.MYSQL
     SQLITE_DB_PATH: str = "checkpoints.db"
+
+    # Transaction Database Configuration for Text2SQL
+    TRANSACTION_DATABASE_TYPE: DatabaseType = (
+        DatabaseType.MYSQL
+    )  # Options: DatabaseType.POSTGRES or DatabaseType.MYSQL
 
     # PostgreSQL Configuration
     POSTGRES_USER: str | None = None
@@ -150,7 +156,7 @@ class Settings(BaseSettings):
     MYSQL_PORT: int | None = None
     MYSQL_USER: str | None = None
     MYSQL_PASSWORD: SecretStr | None = None
-    MYSQL_DB: str = "knowledge_lib"
+    MYSQL_DB: str = "ecommerce"
     MYSQL_CHARSET: str = "utf8mb4"
 
     # Azure OpenAI Settings
@@ -165,7 +171,7 @@ class Settings(BaseSettings):
     JWT_ALG: str | None = "HS256"  # JWT signature 加密算法
     JWT_COOKIE_NAME: str | None = "access_token"  # JWT cookie 字段名
     JWT_EXPIRES_SECONDS: int | None = 60 * 60  # 1h
-    JWT_SECRET: SecretStr | None = "dev-only-change-me"  # JWT加密秘钥
+    JWT_SECRET: SecretStr = SecretStr("dev-only-change-me")  # JWT加密秘钥（必需，生产环境必须修改）
 
     # KnowledgeBase
     KB_FILES_ROOT: str | None = "data/"
@@ -174,7 +180,47 @@ class Settings(BaseSettings):
     TEXT2SQL_ENABLED: bool = True  # Text2SQL 全局开关
     ANALYST_DEFAULT_LIMIT: int = 2000  # analyst 角色默认 LIMIT
     ANALYST_MAX_LIMIT: int = 10000  # analyst 角色最大 LIMIT
-    DEFAULT_DB: str = "ecommerce"  # 默认数据库
+    DEFAULT_DB: str = "ecommerce"  # 默认数据库（已废弃，保留用于兼容性）
+    TARGET_DB: str = "ecommerce"  # Text2SQL 目标数据库
+
+    # Milvus Configuration
+    MILVUS_URI: str | None = None
+    MILVUS_TOKEN: str | None = None
+    MILVUS_USERNAME: str | None = None
+    MILVUS_PASSWORD: SecretStr | None = None
+    MILVUS_DB_NAME: str | None = None
+    MILVUS_TLS: bool = False
+    MILVUS_NPROBE: int = 32
+    MILVUS_COLLECTION_DOC: str = "knowledge_base_doc"
+    MILVUS_COLLECTION_SQL: str = "knowledge_base_sql"
+    MILVUS_TOP_K: int = 3
+
+    # Embedding Configuration
+    EMBEDDING_MODEL_NAME: str = "BAAI/bge-m3"
+    EMBEDDING_DEVICE: str = "cpu"
+    NORMALIZE_EMBEDDINGS: bool = True
+    HF_HOME: str = ".hf_cache"
+
+    # SQL Configuration
+    SQL_DIALECT: str = "mysql"
+    SQL_MAX_ROWS: int = 200
+    TIMEOUT_S: int = 10
+
+    # Voice Configuration
+    VOICE_STT_PROVIDER: str | None = None
+    VOICE_TTS_PROVIDER: str | None = None
+
+    # Agent Configuration
+    AGENT_URL: str | None = None
+
+    # AWS Configuration
+    AWS_KB_ID: str | None = None
+
+    # LangSmith Configuration
+    LANGSMITH_TRACING: bool = False
+    LANGSMITH_API_KEY: SecretStr | None = None
+    LANGSMITH_PROJECT: str | None = None
+    LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"
 
     def model_post_init(self, __context: Any) -> None:
         api_keys = {

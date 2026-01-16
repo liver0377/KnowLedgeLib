@@ -238,8 +238,8 @@ def extract_table_name_from_sql(sql: str) -> Optional[str]:
         parsed = parse_one(sql, dialect="mysql")
 
         if isinstance(parsed, Select):
-            # 获取 FROM 子句中的表
-            from_tables = parsed.find_all(Table)
+            # 获取 FROM 子句中的表，转换为 list 因为 find_all() 返回 generator
+            from_tables = list(parsed.find_all(Table))
             if from_tables:
                 # 返回第一个表名
                 return str(from_tables[0].this)

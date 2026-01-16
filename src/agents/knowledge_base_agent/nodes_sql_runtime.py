@@ -12,6 +12,9 @@ from agents.knowledge_base_agent.sql_validator import validate_sql_
 from agents.knowledge_base_agent.sql_executor import execute_select
 from evaluation import EvaluationManager, ExecutionSuccessEvaluator
 
+import logging
+
+logger = logging.getLogger(__file__)
 
 evaluation_manager = EvaluationManager()
 evaluation_manager.register(ExecutionSuccessEvaluator())
@@ -57,9 +60,9 @@ async def validate_sql(state: AgentState, config: RunnableConfig) -> AgentState:
     dialect = os.getenv("SQL_DIALECT", "mysql")
     sql = state.get("generated_sql", "")
 
-    # 获取用户上下文
-    user_context = state.get("user_context", {})
-    roles = user_context.get("roles", [])
+    # 从 configurable 获取用户角色
+    configurable = config.get("configurable", {})
+    roles = configurable.get("roles", [])
 
     # 基础 SQL 类型验证
     type_valid, type_error = check_sql_type_restrictions(sql)
@@ -121,9 +124,9 @@ async def execute_sql(state: AgentState, config: RunnableConfig) -> AgentState:
 
     sql = state.get("validated_sql") or state.get("generated_sql") or ""
 
-    # 获取用户上下文
-    user_context = state.get("user_context", {})
-    roles = user_context.get("roles", [])
+    # 从 configurable 获取用户角色
+    configurable = config.get("configurable", {})
+    roles = configurable.get("roles", [])
     db = state.get("target_db", "")
 
     # 强制 LIMIT
@@ -204,6 +207,7 @@ async def format_sql_result(state: AgentState, config: RunnableConfig) -> AgentS
             },
         )
 
+    logger.warning(f"format message: {msg}")
     return {"messages": [AIMessage(content=msg)]}
 
 

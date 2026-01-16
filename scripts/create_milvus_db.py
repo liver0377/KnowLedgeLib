@@ -64,7 +64,7 @@ def _load_text2sql_json_documents(folder_path: str) -> list[Document]:
                     metadata={
                         "doc_type": "description",
                         "table_name": table,
-                        "database": it.get("database", ""),  
+                        "database": it.get("database", "ecommerce"),  
                         "source": p,
                         "raw": it,
                     },
@@ -72,7 +72,7 @@ def _load_text2sql_json_documents(folder_path: str) -> list[Document]:
             )
 
     # 2) ddl_descriptions.json
-    p = os.path.join(folder_path, "ddl_descriptions.json")
+    p = os.path.join(folder_path, "ddl_examples.json")
     if os.path.exists(p):
         with open(p, "r", encoding="utf-8") as f:
             items = json.load(f)
@@ -90,7 +90,7 @@ def _load_text2sql_json_documents(folder_path: str) -> list[Document]:
                     metadata={
                         "doc_type": "ddl",
                         "table_name": table,
-                        "database": it.get("database", ""),
+                        "database": it.get("database", "ecommerce"),
                         "source": p,
                         "ddl_statement": ddl,
                         "raw": it,
@@ -388,13 +388,13 @@ def cerate_milvus_sql_db(
 if __name__ == "__main__":
     folder_path = "./data"
 
-    milvus_store = create_milvus_doc_db(
-        folder_path=folder_path,
-        collection_name=os.getenv("MILVUS_COLLECTION", "knowledge_base_doc"),
-        drop_if_exists=True,
-        chunk_size=2000,
-        overlap=500,
-    )
+    # milvus_store = create_milvus_doc_db(
+    #     folder_path=folder_path,
+    #     collection_name=os.getenv("MILVUS_COLLECTION", "knowledge_base_doc"),
+    #     drop_if_exists=True,
+    #     chunk_size=2000,
+    #     overlap=500,
+    # )
 
     # retriever = milvus_store.as_retriever(search_kwargs={"k": 3})
     # query = "What's my company's mission and values"
@@ -406,18 +406,19 @@ if __name__ == "__main__":
     sql_store = cerate_milvus_sql_db(
         folder_path=folder_path,
         collection_name=os.getenv("MILVUS_SQL_COLLECTION", "knowledge_base_sql"),
-        drop_if_exists=True,
+        # drop_if_exists=True,
+        drop_if_exists=False
     )
 
     # # 只查 schema/ddl
-    # sql_retriever = sql_store.as_retriever(search_kwargs={
-    #     "k": 5,
-    #     "expr": 'metadata["doc_type"] in ["ddl","description"]'
-    # })
-    # hits = sql_retriever.invoke("users表有哪些字段？email是否唯一？")
-    # for i, doc in enumerate(hits, 1):
-    #     print(f"\n[SQL KB] Hit {i} type={doc.metadata.get('doc_type')} table={doc.metadata.get('table_name')}")
-    #     print(doc.page_content)
+    sql_retriever = sql_store.as_retriever(search_kwargs={
+        "k": 5,
+        "expr": 'metadata["doc_type"] in ["ddl","description"] and metadata["database"] == "ecommerce"'
+    })
+    hits = sql_retriever.invoke("总共有多少个供应商")
+    for i, doc in enumerate(hits, 1):
+        print(f"\n[SQL KB] Hit {i} type={doc.metadata.get('doc_type')} table={doc.metadata.get('table_name')}")
+        print(doc.page_content)
 
     # # 查 few-shot
     # example_retriever = sql_store.as_retriever(search_kwargs={

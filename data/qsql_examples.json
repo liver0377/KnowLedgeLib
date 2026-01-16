@@ -1,62 +1,127 @@
 [
   {
-    "question": "查询所有用户的姓名和邮箱",
-    "sql": "SELECT name, email FROM users",
+    "question": "查询所有地区的名称和级别",
+    "sql": "SELECT name, level FROM regions",
     "database": "ecommerce"
   },
   {
-    "question": "查找年龄大于25岁的用户",
-    "sql": "SELECT * FROM users WHERE age > 25",
+    "question": "查询某个用户的所有地址",
+    "sql": "SELECT a.*, r.name as region_name FROM addresses a JOIN regions r ON a.region_id = r.id WHERE a.user_id = 1",
     "database": "ecommerce"
   },
   {
-    "question": "查询每个用户的订单数量",
-    "sql": "SELECT u.name, COUNT(o.id) as order_count FROM users u LEFT JOIN orders o ON u.id = o.user_id GROUP BY u.id, u.name",
+    "question": "查询某个用户默认的收货地址",
+    "sql": "SELECT a.*, r.name as region_name FROM addresses a JOIN regions r ON a.region_id = r.id WHERE a.user_id = 1 AND a.is_default = TRUE",
     "database": "ecommerce"
   },
   {
-    "question": "查找最近7天的订单",
-    "sql": "SELECT * FROM orders WHERE order_date >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
+    "question": "查询某个订单的完整状态变更历史",
+    "sql": "SELECT * FROM order_status_history WHERE order_id = 1 ORDER BY changed_at ASC",
     "database": "ecommerce"
   },
   {
-    "question": "查询总销售额最高的前5个产品",
-    "sql": "SELECT p.name, SUM(oi.quantity * oi.unit_price) as total_sales FROM products p JOIN order_items oi ON p.id = oi.product_id GROUP BY p.id, p.name ORDER BY total_sales DESC LIMIT 5",
+    "question": "查询当前状态为已支付的订单",
+    "sql": "SELECT o.* FROM orders o JOIN (SELECT order_id FROM order_status_history WHERE status = 'paid' ORDER BY changed_at DESC LIMIT 1 GROUP BY order_id) latest ON o.id = latest.order_id",
     "database": "ecommerce"
   },
   {
-    "question": "查询某个用户的所有订单",
-    "sql": "SELECT o.*, u.name as user_name FROM orders o JOIN users u ON o.user_id = u.id WHERE u.name = '张三'",
+    "question": "查询某个订单的支付信息",
+    "sql": "SELECT * FROM payments WHERE order_id = 1",
     "database": "ecommerce"
   },
   {
-    "question": "查询价格在100到500之间的产品",
-    "sql": "SELECT * FROM products WHERE price BETWEEN 100 AND 500",
+    "question": "查询支付成功的订单及其支付金额",
+    "sql": "SELECT o.*, p.amount, p.payment_method FROM orders o JOIN payments p ON o.id = p.order_id WHERE p.payment_status = 'success'",
     "database": "ecommerce"
   },
   {
-    "question": "查询库存少于10的产品",
-    "sql": "SELECT * FROM products WHERE stock < 10",
+    "question": "查询某个订单的退款信息",
+    "sql": "SELECT r.*, p.amount as original_amount FROM refunds r JOIN payments p ON r.payment_id = p.id WHERE p.order_id = 1",
     "database": "ecommerce"
   },
   {
-    "question": "查询每个分类的产品数量",
-    "sql": "SELECT category, COUNT(*) as product_count FROM products GROUP BY category",
+    "question": "查询某个产品所有变体的库存",
+    "sql": "SELECT * FROM product_variants WHERE product_id = 1",
     "database": "ecommerce"
   },
   {
-    "question": "查询订单总金额大于1000的订单",
-    "sql": "SELECT o.*, SUM(oi.quantity * oi.unit_price) as total_amount FROM orders o JOIN order_items oi ON o.id = oi.order_id GROUP BY o.id HAVING total_amount > 1000",
+    "question": "查询库存少于5的产品变体",
+    "sql": "SELECT pv.*, p.name as product_name FROM product_variants pv JOIN products p ON pv.product_id = p.id WHERE pv.stock < 5",
     "database": "ecommerce"
   },
   {
-    "question": "查询没有下过订单的用户",
-    "sql": "SELECT u.* FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE o.id IS NULL",
+    "question": "查询某个产品变体的库存变更记录",
+    "sql": "SELECT * FROM inventory_logs WHERE variant_id = 1 ORDER BY changed_at DESC",
     "database": "ecommerce"
   },
   {
-    "question": "查询平均订单金额",
-    "sql": "SELECT AVG(total_amount) as avg_order_amount FROM (SELECT o.id, SUM(oi.quantity * oi.unit_price) as total_amount FROM orders o JOIN order_items oi ON o.id = oi.order_id GROUP BY o.id) as order_totals",
+    "question": "查询某个产品变体的当前库存",
+    "sql": "SELECT SUM(CASE WHEN change_type = 'in' OR change_type = 'adjust' THEN quantity ELSE -quantity END) as current_stock FROM inventory_logs WHERE variant_id = 1",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询所有供应商信息",
+    "sql": "SELECT * FROM suppliers",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询某个产品的供应商",
+    "sql": "SELECT s.* FROM suppliers s JOIN product_suppliers ps ON s.id = ps.supplier_id WHERE ps.product_id = 1",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询某个供应商供应的所有产品",
+    "sql": "SELECT p.* FROM products p JOIN product_suppliers ps ON p.id = ps.product_id WHERE ps.supplier_id = 1",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询当前有效的促销活动",
+    "sql": "SELECT * FROM promotions WHERE CURDATE() BETWEEN start_date AND end_date",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询某个订单使用的促销活动",
+    "sql": "SELECT p.* FROM promotions p JOIN order_promotions op ON p.id = op.promotion_id WHERE op.order_id = 1",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询某个促销活动被多少订单使用",
+    "sql": "SELECT p.*, COUNT(op.order_id) as usage_count FROM promotions p LEFT JOIN order_promotions op ON p.id = op.promotion_id GROUP BY p.id, p.name, p.discount_type, p.discount_value, p.start_date, p.end_date",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询某个用户的所有行为事件",
+    "sql": "SELECT * FROM user_events WHERE user_id = 1 ORDER BY created_at DESC",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询最近7天用户的浏览记录",
+    "sql": "SELECT ue.*, u.name as user_name FROM user_events ue JOIN users u ON ue.user_id = u.id WHERE ue.event_type = 'view' AND ue.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询某个产品被多少用户查看过",
+    "sql": "SELECT COUNT(DISTINCT user_id) as view_count FROM user_events WHERE event_type = 'view' AND target = 'product_1'",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询某个地区下所有子地区",
+    "sql": "SELECT * FROM regions WHERE parent_id = 1",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询所有省级行政区",
+    "sql": "SELECT * FROM regions WHERE level = 'province'",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询所有使用支付宝支付成功的订单",
+    "sql": "SELECT o.* FROM orders o JOIN payments p ON o.id = p.order_id WHERE p.payment_method = 'alipay' AND p.payment_status = 'success'",
+    "database": "ecommerce"
+  },
+  {
+    "question": "查询退款总额最高的5个订单",
+    "sql": "SELECT o.*, SUM(r.refund_amount) as total_refund FROM orders o JOIN payments p ON o.id = p.order_id JOIN refunds r ON p.id = r.payment_id GROUP BY o.id ORDER BY total_refund DESC LIMIT 5",
     "database": "ecommerce"
   }
-] 
+]

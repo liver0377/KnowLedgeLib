@@ -8,11 +8,10 @@ import hashlib
 import logging
 import os
 from uuid import uuid5, NAMESPACE_URL
-from typing import Any, Optional
+from typing import Any
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader
-from langchain_community.embeddings import HuggingFaceBgeEmbeddings
 from langchain_milvus import Milvus as MilvusVectorStore
 from pymilvus import (
     Collection,
@@ -23,94 +22,9 @@ from pymilvus import (
     utility,
 )
 
+from core.embeddings import get_cached_embeddings
+
 logger = logging.getLogger(__name__)
-
-# ========== 全局缓存：Embedding 模型 ==========
-_embeddings_cache = None
-_embeddings_cache_key = None
-_embeddings_lock = __import__("threading").Lock()
-
-
-def _should_reload_embeddings(
-    embedding_model_name: str,
-    device: str,
-    normalize_embeddings: bool,
-) -> bool:
-    """检查是否需要重新加载 Embedding 模型
-
-    如果模型配置发生变化，需要重新加载缓存
-    """
-    global _embeddings_cache_key
-
-    if _embeddings_cache is None:
-        return True
-
-    # 检查配置是否变化
-    new_key = f"{embedding_model_name}:{device}:{normalize_embeddings}"
-    if _embeddings_cache_key != new_key:
-        logger.info(f"Embedding config changed, reloading: {_embeddings_cache_key} -> {new_key}")
-        return True
-
-    return False
-
-
-def get_embeddings_cached(
-    embedding_model_name: str = "BAAI/bge-m3",
-    device: Optional[str] = None,
-    normalize_embeddings: bool = True,
-) -> HuggingFaceBgeEmbeddings:
-    """获取缓存的 Embedding 模型
-
-    首次调用时加载模型，后续调用返回缓存的实例
-
-    Args:
-        embedding_model_name: 模型名称
-        device: 运行设备（cpu/cuda）
-        normalize_embeddings: 是否归一化
-
-    Returns:
-        HuggingFaceBgeEmbeddings 实例（可能来自缓存）
-    """
-    global _embeddings_cache, _embeddings_cache_key, _embeddings_lock
-
-    resolved_device = device or os.getenv("EMBEDDING_DEVICE", "cpu")
-    model_kwargs = {"device": resolved_device} if resolved_device else {}
-
-    # 检查是否需要重新加载
-    if _should_reload_embeddings(embedding_model_name, resolved_device, normalize_embeddings):
-        with _embeddings_lock:
-            # 双重检查，避免重复加载
-            if _should_reload_embeddings(
-                embedding_model_name, resolved_device, normalize_embeddings
-            ):
-                logger.info(
-                    f"Loading embedding model (first time or config changed): {embedding_model_name}"
-                )
-                logger.info(f"Model will run on device: {resolved_device}")
-
-                _embeddings_cache = HuggingFaceBgeEmbeddings(
-                    model_name=embedding_model_name,
-                    model_kwargs=model_kwargs,
-                    encode_kwargs={
-                        "normalize_embeddings": normalize_embeddings,
-                    },
-                )
-
-                # 更新缓存键
-                _embeddings_cache_key = (
-                    f"{embedding_model_name}:{resolved_device}:{normalize_embeddings}"
-                )
-                logger.info("Embedding model loaded and cached")
-    else:
-        logger.debug("Using cached embedding model")
-
-    return _embeddings_cache
-
-
-# ========== 全局缓存：Embedding 模型 ==========
-_embeddings_cache = None
-_embeddings_cache_key = None  # 用于检查缓存是否需要重建
-_embeddings_lock = __import__("threading").Lock()
 
 
 def sha1_file(path: str, buf_size: int = 1024 * 1024) -> str:
@@ -241,24 +155,14 @@ def ensure_collection(
 
 def get_embeddings(
     embedding_model_name: str = "BAAI/bge-m3",
-    device: Optional[str] = None,
+    device: str | None = None,
     normalize_embeddings: bool = True,
-) -> HuggingFaceBgeEmbeddings:
-    """初始化 HuggingFaceBgeEmbeddings 模型
-
-    Args:
-        embedding_model_name: 模型名称，默认 BAAI/bge-m3
-        device: 运行设备（cpu/cuda），默认从环境变量读取
-        normalize_embeddings: 是否归一化向量，默认 True
-
-    Returns:
-        HuggingFaceBgeEmbeddings 实例
-    """
-    resolved_device = device or os.getenv("EMBEDDING_DEVICE", "cpu")
-    model_kwargs = {"device": resolved_device} if resolved_device else {}
-
-    logger.info(
-        f"Initializing embedding model: {embedding_model_name} on device: {resolved_device}"
+):
+    """获取 Embedding 模型（使用统一的缓存）"""
+    return get_cached_embeddings(
+        embedding_model_name=embedding_model_name,
+        device=device,
+        normalize_embeddings=normalize_embeddings,
     )
 
     return HuggingFaceBgeEmbeddings(

@@ -94,19 +94,19 @@ async def resolve_target_db(state: AgentState, config: RunnableConfig) -> AgentS
     """
     from service.text2sql_permissions import should_use_analytics_views
 
-    user_context = state.get("user_context", {})
     configurable = config.get("configurable", {})
 
-    db = configurable.get("target_db") or os.getenv("DEFAULT_DB", "")
+    db = configurable.get("target_db") or os.getenv("TARGET_DB", "ecommerce")
 
-    can_use_text2sql = user_context.get("can_use_text2sql", False)
+    can_use_text2sql = configurable.get("can_use_text2sql", False)
+    # print(f"can_use_text2sql: {can_use_text2sql}")
     if not can_use_text2sql:
         return {
             "target_db": db,
             "messages": [SystemMessage(content="您没有使用 Text2SQL 的权限，请联系管理员")],
         }
 
-    allowed_databases = user_context.get("text2sql_allowed_databases", [])
+    allowed_databases = configurable.get("text2sql_allowed_databases", [])
     if db not in allowed_databases:
         return {
             "target_db": db,
@@ -114,7 +114,7 @@ async def resolve_target_db(state: AgentState, config: RunnableConfig) -> AgentS
         }
 
     use_analytics_views = should_use_analytics_views(
-        user_context.get("roles", []), user_context.get("permissions", set())
+        configurable.get("roles", []), configurable.get("permissions", set())
     )
 
     return {"target_db": db, "use_analytics_views": use_analytics_views}
@@ -127,8 +127,8 @@ async def retrieve_sql_schema(state: AgentState, config: RunnableConfig) -> Agen
     from service.text2sql_permissions import Text2SQLPermissionDAO
 
     db = state.get("target_db", "")
-    user_context = state.get("user_context", {})
-    roles = user_context.get("roles", [])
+    configurable = config.get("configurable", {})
+    roles = configurable.get("roles", [])
 
     if state.get("error"):
         return {"error": state["error"]}
@@ -139,6 +139,8 @@ async def retrieve_sql_schema(state: AgentState, config: RunnableConfig) -> Agen
     expr = _build_schema_filter(db, table_filter)
     query = _extract_user_question(state)
 
+    print(f"expr: {expr}")
+    print(f"query: {query}")
     docs = await _retrieve_documents(
         collection=os.getenv("MILVUS_COLLECTION_SQL", DEFAULT_COLLECTION),
         query=query,

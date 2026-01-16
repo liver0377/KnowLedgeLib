@@ -194,3 +194,6 @@ privatecredentials/*
 
 # milvus
 infra/milvus/volumes
+
+# HuggingFace model cache
+.hf_cache/

@@ -1,57 +1,129 @@
 [
   {
-    "table_name": "users",
-    "table_description": "用户信息表，存储注册用户的基本信息",
+    "table_name": "regions",
+    "table_description": "地区表，存储国家、省份、城市、区县等地理层级信息",
     "columns": [
-      {"name": "id", "description": "用户唯一标识符，主键", "type": "INT"},
-      {"name": "name", "description": "用户姓名，不能为空", "type": "VARCHAR(100)"},
-      {"name": "email", "description": "用户邮箱地址，必须唯一", "type": "VARCHAR(150)"},
-      {"name": "age", "description": "用户年龄", "type": "INT"},
-      {"name": "created_at", "description": "用户注册时间", "type": "TIMESTAMP"}
+      {"name": "id", "description": "地区唯一标识符，主键", "type": "INT"},
+      {"name": "name", "description": "地区名称，不能为空", "type": "VARCHAR(100)"},
+      {"name": "parent_id", "description": "上级地区ID，外键关联regions表自身", "type": "INT"},
+      {"name": "level", "description": "地区级别枚举值", "type": "ENUM('country','province','city','district')"}
     ]
   },
   {
-    "table_name": "orders",
-    "table_description": "订单表，记录用户的购买订单信息",
+    "table_name": "addresses",
+    "table_description": "用户地址表，存储用户的收货地址信息",
     "columns": [
-      {"name": "id", "description": "订单唯一标识符，主键", "type": "INT"},
-      {"name": "user_id", "description": "下单用户的ID，外键关联users表", "type": "INT"},
-      {"name": "product_name", "description": "购买的产品名称", "type": "VARCHAR(200)"},
-      {"name": "quantity", "description": "购买数量", "type": "INT"},
-      {"name": "price", "description": "订单总价格", "type": "DECIMAL(10,2)"},
-      {"name": "order_date", "description": "下单时间", "type": "TIMESTAMP"}
+      {"name": "id", "description": "地址唯一标识符，主键", "type": "INT"},
+      {"name": "user_id", "description": "关联的用户ID，外键", "type": "INT"},
+      {"name": "region_id", "description": "关联的地区ID，外键", "type": "INT"},
+      {"name": "detail", "description": "详细地址", "type": "VARCHAR(255)"},
+      {"name": "is_default", "description": "是否为默认地址", "type": "BOOLEAN"},
+      {"name": "created_at", "description": "地址创建时间", "type": "TIMESTAMP"}
     ]
   },
   {
-    "table_name": "products",
-    "table_description": "产品表，存储商城中所有产品的信息",
+    "table_name": "order_status_history",
+    "table_description": "订单状态历史表，记录订单状态变更历史",
     "columns": [
-      {"name": "id", "description": "产品唯一标识符，主键", "type": "INT"},
-      {"name": "name", "description": "产品名称", "type": "VARCHAR(200)"},
-      {"name": "category", "description": "产品分类", "type": "VARCHAR(100)"},
-      {"name": "price", "description": "产品单价", "type": "DECIMAL(10,2)"},
-      {"name": "stock", "description": "库存数量", "type": "INT"},
-      {"name": "description", "description": "产品详细描述", "type": "TEXT"}
-    ]
-  },
-  {
-    "table_name": "categories",
-    "table_description": "产品分类表，定义产品的分类信息",
-    "columns": [
-      {"name": "id", "description": "分类唯一标识符，主键", "type": "INT"},
-      {"name": "name", "description": "分类名称，必须唯一", "type": "VARCHAR(100)"},
-      {"name": "description", "description": "分类描述", "type": "TEXT"}
-    ]
-  },
-  {
-    "table_name": "order_items",
-    "table_description": "订单明细表，存储订单中包含的具体商品信息",
-    "columns": [
-      {"name": "id", "description": "订单明细唯一标识符，主键", "type": "INT"},
+      {"name": "id", "description": "状态记录唯一标识符，主键", "type": "INT"},
       {"name": "order_id", "description": "关联的订单ID，外键", "type": "INT"},
+      {"name": "status", "description": "订单状态枚举值", "type": "ENUM('created','paid','shipped','delivered','cancelled','refunded')"},
+      {"name": "changed_at", "description": "状态变更时间", "type": "TIMESTAMP"}
+    ]
+  },
+  {
+    "table_name": "payments",
+    "table_description": "支付表，记录订单的支付信息",
+    "columns": [
+      {"name": "id", "description": "支付记录唯一标识符，主键", "type": "INT"},
+      {"name": "order_id", "description": "关联的订单ID，外键", "type": "INT"},
+      {"name": "payment_method", "description": "支付方式枚举值", "type": "ENUM('alipay','wechat','credit_card','paypal')"},
+      {"name": "amount", "description": "支付金额", "type": "DECIMAL(10,2)"},
+      {"name": "payment_status", "description": "支付状态枚举值", "type": "ENUM('pending','success','failed')"},
+      {"name": "paid_at", "description": "支付完成时间", "type": "TIMESTAMP"}
+    ]
+  },
+  {
+    "table_name": "refunds",
+    "table_description": "退款表，记录订单的退款信息",
+    "columns": [
+      {"name": "id", "description": "退款记录唯一标识符，主键", "type": "INT"},
+      {"name": "payment_id", "description": "关联的支付记录ID，外键", "type": "INT"},
+      {"name": "refund_amount", "description": "退款金额", "type": "DECIMAL(10,2)"},
+      {"name": "refund_reason", "description": "退款原因", "type": "VARCHAR(255)"},
+      {"name": "refunded_at", "description": "退款时间", "type": "TIMESTAMP"}
+    ]
+  },
+  {
+    "table_name": "product_variants",
+    "table_description": "产品变体表，存储产品的不同规格（如颜色、尺寸）",
+    "columns": [
+      {"name": "id", "description": "产品变体唯一标识符，主键", "type": "INT"},
       {"name": "product_id", "description": "关联的产品ID，外键", "type": "INT"},
-      {"name": "quantity", "description": "该商品在订单中的数量", "type": "INT"},
-      {"name": "unit_price", "description": "该商品的单价（下单时的价格）", "type": "DECIMAL(10,2)"}
+      {"name": "sku_code", "description": "SKU编码，必须唯一", "type": "VARCHAR(100)"},
+      {"name": "color", "description": "颜色", "type": "VARCHAR(50)"},
+      {"name": "size", "description": "尺寸", "type": "VARCHAR(50)"},
+      {"name": "price", "description": "变体价格", "type": "DECIMAL(10,2)"},
+      {"name": "stock", "description": "库存数量", "type": "INT"}
+    ]
+  },
+  {
+    "table_name": "inventory_logs",
+    "table_description": "库存日志表，记录产品变体的库存变更历史",
+    "columns": [
+      {"name": "id", "description": "日志记录唯一标识符，主键", "type": "INT"},
+      {"name": "variant_id", "description": "关联的产品变体ID，外键", "type": "INT"},
+      {"name": "change_type", "description": "变更类型枚举值", "type": "ENUM('in','out','adjust')"},
+      {"name": "quantity", "description": "变更数量", "type": "INT"},
+      {"name": "changed_at", "description": "变更时间", "type": "TIMESTAMP"}
+    ]
+  },
+  {
+    "table_name": "suppliers",
+    "table_description": "供应商表，存储产品供应商信息",
+    "columns": [
+      {"name": "id", "description": "供应商唯一标识符，主键", "type": "INT"},
+      {"name": "name", "description": "供应商名称", "type": "VARCHAR(200)"},
+      {"name": "contact_email", "description": "联系邮箱", "type": "VARCHAR(150)"}
+    ]
+  },
+  {
+    "table_name": "product_suppliers",
+    "table_description": "产品供应商关联表，建立产品与供应商的多对多关系",
+    "columns": [
+      {"name": "product_id", "description": "关联的产品ID，外键，联合主键", "type": "INT"},
+      {"name": "supplier_id", "description": "关联的供应商ID，外键，联合主键", "type": "INT"}
+    ]
+  },
+  {
+    "table_name": "promotions",
+    "table_description": "促销活动表，定义各种促销活动的规则",
+    "columns": [
+      {"name": "id", "description": "促销活动唯一标识符，主键", "type": "INT"},
+      {"name": "name", "description": "促销活动名称", "type": "VARCHAR(200)"},
+      {"name": "discount_type", "description": "折扣类型枚举值", "type": "ENUM('percentage','fixed')"},
+      {"name": "discount_value", "description": "折扣值", "type": "DECIMAL(10,2)"},
+      {"name": "start_date", "description": "活动开始日期", "type": "DATE"},
+      {"name": "end_date", "description": "活动结束日期", "type": "DATE"}
+    ]
+  },
+  {
+    "table_name": "order_promotions",
+    "table_description": "订单促销关联表，记录订单应用的促销活动",
+    "columns": [
+      {"name": "order_id", "description": "关联的订单ID，外键，联合主键", "type": "INT"},
+      {"name": "promotion_id", "description": "关联的促销活动ID，外键，联合主键", "type": "INT"}
+    ]
+  },
+  {
+    "table_name": "user_events",
+    "table_description": "用户事件表，记录用户在平台上的各种行为事件",
+    "columns": [
+      {"name": "id", "description": "事件记录唯一标识符，主键", "type": "INT"},
+      {"name": "user_id", "description": "关联的用户ID，外键", "type": "INT"},
+      {"name": "event_type", "description": "事件类型枚举值", "type": "ENUM('view','add_to_cart','search','purchase')"},
+      {"name": "target", "description": "事件目标（如产品ID、搜索关键词等）", "type": "VARCHAR(255)"},
+      {"name": "created_at", "description": "事件发生时间", "type": "TIMESTAMP"}
     ]
   }
-] 
+]

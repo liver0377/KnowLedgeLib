@@ -1,10 +1,12 @@
 import os
-from typing import Any, Optional
+from typing import Any
 
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_milvus import Milvus as MilvusVectorStore  
+from core.embeddings import get_cached_embeddings
+from langchain_milvus import Milvus as MilvusVectorStore
+
 
 def build_connection_args() -> dict[str, Any]:
+    """构建 Milvus 连接参数"""
     uri = os.environ["MILVUS_URI"]
     args: dict[str, Any] = {"uri": uri}
     if token := os.environ.get("MILVUS_TOKEN"):
@@ -15,25 +17,25 @@ def build_connection_args() -> dict[str, Any]:
         args["secure"] = True
     return args
 
-def get_embeddings(
-    embedding_model_name: str = "BAAI/bge-m3",
-    device: Optional[str] = None,
-    normalize_embeddings: bool = True,
-):
-    resolved_device = device or os.getenv("EMBEDDING_DEVICE", "cpu")
-    model_kwargs = {"device": resolved_device} if resolved_device else {}
-    return HuggingFaceEmbeddings(
-        model_name=embedding_model_name,
-        model_kwargs=model_kwargs,
-        encode_kwargs={"normalize_embeddings": normalize_embeddings},
-    )
 
 def make_retriever(
     collection_name: str,
     k: int = 5,
     expr: str | None = None,
 ):
-    embeddings = get_embeddings()
+    """创建 Milvus 检索器
+
+    使用统一的缓存嵌入模型实例，避免重复加载。
+
+    Args:
+        collection_name: Milvus 集合名称
+        k: 返回的文档数量
+        expr: 过滤表达式
+
+    Returns:
+        Milvus 向量检索器
+    """
+    embeddings = get_cached_embeddings()
     vs = MilvusVectorStore(
         embedding_function=embeddings,
         collection_name=collection_name,
@@ -43,7 +45,10 @@ def make_retriever(
         text_field="text",
         metadata_field="metadata",
         auto_id=False,
-        search_params={"metric_type": "COSINE", "params": {"nprobe": int(os.getenv("MILVUS_NPROBE", "32"))}},
+        search_params={
+            "metric_type": "COSINE",
+            "params": {"nprobe": int(os.getenv("MILVUS_NPROBE", "32"))},
+        },
     )
 
     search_kwargs: dict[str, Any] = {"k": k}
