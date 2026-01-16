@@ -576,12 +576,16 @@ async def _handle_input(
     user_id = user.get("user_id")
     roles = user.get("roles", [])
     allowed_dept_keys = user.get("allowed_dept_keys", [])
+    can_use_text2sql = user.get("can_use_text2sql", False)
+    text2sql_allowed_databases = user.get("text2sql_allowed_databases", [])
 
     configurable = {
         "thread_id": thread_id,
         "user_id": user_id,
         "roles": roles,
         "allowed_dept_keys": allowed_dept_keys,
+        "can_use_text2sql": can_use_text2sql,
+        "text2sql_allowed_databases": text2sql_allowed_databases,
     }
 
     if user_input.model is not None:

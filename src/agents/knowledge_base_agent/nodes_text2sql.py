@@ -28,23 +28,68 @@ def _summarize_docs(docs) -> list[dict[str, Any]]:
 
 
 async def resolve_target_db(state: AgentState, config: RunnableConfig) -> AgentState:
+    """
+    解析目标数据库，并验证用户权限
+
+    从 configurable 传入（例如前端选择了数据库），如果没有则使用默认数据库
+    检查用户是否有权限访问该数据库
+    """
+    from service.text2sql_permissions import should_use_analytics_views
+
+    # 获取用户上下文
+    user_context = state.get("user_context", {})
+
     # 优先从 configurable 传入（例如前端选择了数据库）
     db = config["configurable"].get("target_db") if "configurable" in config else None
     if not db:
         db = os.getenv("DEFAULT_DB", "")
-    return {"target_db": db}
+
+    # 检查 text2sql 权限
+    can_use_text2sql = user_context.get("can_use_text2sql", False)
+    if not can_use_text2sql:
+        return {"target_db": db, "error": "您没有使用 Text2SQL 的权限，请联系管理员"}
+
+    # 检查数据库访问权限
+    allowed_databases = user_context.get("text2sql_allowed_databases", [])
+    if db not in allowed_databases:
+        return {"target_db": db, "error": f"您无权访问数据库: {db}"}
+
+    # 判断是否使用 analytics 视图
+    use_analytics_views = should_use_analytics_views(
+        user_context.get("roles", []), user_context.get("permissions", set())
+    )
+
+    return {"target_db": db, "use_analytics_views": use_analytics_views}
 
 
 async def retrieve_sql_schema(state: AgentState, config: RunnableConfig) -> AgentState:
     """
-    获取table的shcema以及字段信息
+    获取table的schema以及字段信息，并根据用户权限过滤
     """
+    from service.text2sql_permissions import Text2SQLPermissionDAO
+
     collection = os.getenv("MILVUS_COLLECTION_SQL", "knowledge_base_sql")
     db = state.get("target_db", "")
+
+    # 获取用户上下文
+    user_context = state.get("user_context", {})
+    roles = user_context.get("roles", [])
+
+    # 检查是否有错误
+    if state.get("error"):
+        return {"error": state["error"]}
 
     expr = 'metadata["doc_type"] in ["ddl","description"]'
     if db:
         expr += f' and metadata["database"] == "{db}"'
+
+    # 获取允许访问的表列表（analyst 只能访问非敏感数据）
+    allowed_tables = Text2SQLPermissionDAO.get_allowed_tables_for_user(db, roles)
+
+    # 如果有表权限限制，添加过滤条件
+    if allowed_tables and "admin" not in roles:
+        table_filter = " or ".join([f'metadata["table_name"] == "{t}"' for t in allowed_tables])
+        expr += f" and ({table_filter})"
 
     retriever = make_retriever(collection_name=collection, k=6, expr=expr)
 

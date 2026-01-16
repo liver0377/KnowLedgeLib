@@ -14,13 +14,13 @@ CREATE DATABASE IF NOT EXISTS knowledge_lib DEFAULT CHARACTER SET utf8mb4 COLLAT
 USE knowledge_lib;
 
 -- -----------------------------------------------------------------------------
--- 0. 先删除视图（依赖表，必须先删）
+-- 0. 先删除视图（依赖表,必须先删）
 -- -----------------------------------------------------------------------------
 DROP VIEW IF EXISTS v_user_dept_access;
 DROP VIEW IF EXISTS v_user_permissions;
 
 -- -----------------------------------------------------------------------------
--- 0. 再按依赖顺序删除表（先子表/依赖表，再父表）
+-- 0. 再按依赖顺序删除表（先子表/依赖表,再父表）
 -- -----------------------------------------------------------------------------
 DROP TABLE IF EXISTS audit_logs;
 DROP TABLE IF EXISTS pending_users;
@@ -57,7 +57,7 @@ CREATE TABLE roles (
     role_key        VARCHAR(32)     NOT NULL UNIQUE COMMENT '角色标识: admin, member',
     name            VARCHAR(64)     NOT NULL COMMENT '角色名称',
     description     VARCHAR(255)    DEFAULT NULL COMMENT '角色描述',
-    priority        INT             NOT NULL DEFAULT 0 COMMENT '优先级，数字越大优先级越高',
+    priority        INT             NOT NULL DEFAULT 0 COMMENT '优先级,数字越大优先级越高',
     is_system       TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '是否系统内置角色: 1=是, 0=否',
     created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -92,7 +92,7 @@ CREATE TABLE departments (
     dept_key        VARCHAR(64)     NOT NULL UNIQUE COMMENT '部门标识: AI, micro_service 等',
     name            VARCHAR(128)    NOT NULL COMMENT '部门名称',
     description     VARCHAR(255)    DEFAULT NULL COMMENT '部门描述',
-    parent_id       BIGINT UNSIGNED DEFAULT NULL COMMENT '父部门ID，用于部门层级',
+    parent_id       BIGINT UNSIGNED DEFAULT NULL COMMENT '父部门ID,用于部门层级',
     is_active       TINYINT(1)      NOT NULL DEFAULT 1 COMMENT '是否启用: 1=启用, 0=禁用',
     created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',

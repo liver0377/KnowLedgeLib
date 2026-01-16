@@ -44,9 +44,48 @@ async def repair_sql(state: AgentState, config: RunnableConfig) -> AgentState:
 
 
 async def validate_sql(state: AgentState, config: RunnableConfig) -> AgentState:
-    """校验 sql 语句是否满足权限要求，并进行规范化"""
+    """
+    校验 sql 语句是否满足权限要求，并进行规范化
+    包括: SELECT 限制、多语句检查、LIMIT 验证
+    """
+    from service.text2sql_permissions import check_sql_type_restrictions, validate_sql_limit
+
     dialect = os.getenv("SQL_DIALECT", "mysql")
     sql = state.get("generated_sql", "")
+
+    # 获取用户上下文
+    user_context = state.get("user_context", {})
+    roles = user_context.get("roles", [])
+
+    # 基础 SQL 类型验证
+    type_valid, type_error = check_sql_type_restrictions(sql)
+    if not type_valid:
+        return {
+            "sql_attempt": state.get("sql_attempt", 0) + 1,
+            "validated_sql": "",
+            "sql_validation_error": type_error,
+            "sql_error_stage": "validate",
+            "sql_error_type": "not_select",
+        }
+
+    # 验证 LIMIT 子句（analyst 角色必须有限制）
+    if "admin" not in roles:
+        from core import settings
+
+        default_limit = getattr(settings, "ANALYST_DEFAULT_LIMIT", 2000)
+        max_limit = getattr(settings, "ANALYST_MAX_LIMIT", 10000)
+
+        limit_valid, limit_msg, limit_value = validate_sql_limit(sql, default_limit, max_limit)
+        if not limit_valid:
+            return {
+                "sql_attempt": state.get("sql_attempt", 0) + 1,
+                "validated_sql": "",
+                "sql_validation_error": limit_msg,
+                "sql_error_stage": "validate",
+                "sql_error_type": "parse_error",
+            }
+
+    # 使用 sqlglot 进行规范化验证
     vr = validate_sql_(sql, dialect=dialect)
 
     if not vr.ok:
@@ -70,10 +109,26 @@ async def validate_sql(state: AgentState, config: RunnableConfig) -> AgentState:
 
 
 async def execute_sql(state: AgentState, config: RunnableConfig) -> AgentState:
-    """执行 sql 语句"""
+    """
+    执行 sql 语句，并对结果进行脱敏处理
+    """
+    from service.text2sql_permissions import mask_query_result, extract_table_name_from_sql
+
     sql = state.get("validated_sql") or state.get("generated_sql") or ""
+
+    # 获取用户上下文
+    user_context = state.get("user_context", {})
+    roles = user_context.get("roles", [])
+    db = state.get("target_db", "")
+
     # 强制 LIMIT
-    limit = int(os.getenv("SQL_MAX_ROWS", "200"))
+    if "admin" not in roles:
+        from core import settings
+
+        limit = int(getattr(settings, "ANALYST_DEFAULT_LIMIT", 2000))
+    else:
+        limit = int(os.getenv("SQL_MAX_ROWS", "200"))
+
     sql = ensure_limit(sql, limit=limit)
 
     loop = asyncio.get_running_loop()
@@ -92,9 +147,16 @@ async def execute_sql(state: AgentState, config: RunnableConfig) -> AgentState:
             "sql_exec_rowcount": 0,
         }
 
+    # 对查询结果进行脱敏处理
+    table_name = extract_table_name_from_sql(sql)
+    masked_rows = result.rows
+
+    if table_name and db:
+        masked_rows = mask_query_result(result.rows, db, table_name, roles)
+
     return {
         "sql_exec_error": "",
-        "sql_exec_rows": result.rows,
+        "sql_exec_rows": masked_rows,
         "sql_exec_columns": result.columns,
         "sql_exec_rowcount": result.rowcount,
         "validated_sql": sql,  # 把加了limit的版本存下来

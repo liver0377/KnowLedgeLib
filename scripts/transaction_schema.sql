@@ -1,5 +1,18 @@
 USE ecommerce;
 
+DROP TABLE IF EXISTS user_events;
+DROP TABLE IF EXISTS order_promotions;
+DROP TABLE IF EXISTS promotions;
+DROP TABLE IF EXISTS product_suppliers;
+DROP TABLE IF EXISTS suppliers;
+DROP TABLE IF EXISTS inventory_logs;
+DROP TABLE IF EXISTS product_variants;
+DROP TABLE IF EXISTS refunds;
+DROP TABLE IF EXISTS payments;
+DROP TABLE IF EXISTS order_status_history;
+DROP TABLE IF EXISTS addresses;
+DROP TABLE IF EXISTS regions;
+
 CREATE TABLE regions (
   id INT PRIMARY KEY AUTO_INCREMENT,
   name VARCHAR(100) NOT NULL,

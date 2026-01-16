@@ -170,6 +170,12 @@ class Settings(BaseSettings):
     # KnowledgeBase
     KB_FILES_ROOT: str | None = "data/"
 
+    # Text2SQL Permissions Configuration
+    TEXT2SQL_ENABLED: bool = True  # Text2SQL 全局开关
+    ANALYST_DEFAULT_LIMIT: int = 2000  # analyst 角色默认 LIMIT
+    ANALYST_MAX_LIMIT: int = 10000  # analyst 角色最大 LIMIT
+    DEFAULT_DB: str = "ecommerce"  # 默认数据库
+
     def model_post_init(self, __context: Any) -> None:
         api_keys = {
             Provider.OPENAI: self.OPENAI_API_KEY,

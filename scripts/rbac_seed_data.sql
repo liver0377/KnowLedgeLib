@@ -41,12 +41,13 @@ ALTER TABLE audit_logs AUTO_INCREMENT = 1;
 
 -- =============================================================================
 -- 1. 初始化角色 (roles)
--- 全局角色只有 admin 和 member
+-- 全局角色: admin, member, analyst
 -- =============================================================================
 INSERT INTO roles (role_key, name, description, priority, is_system) VALUES
-('admin',   '管理员',  '拥有所有权限，不受部门限制',                    100, 1),
-('member',  '普通用户', '普通用户，部门权限由 can_read 和 can_write 控制', 10,  1)
-ON DUPLICATE KEY UPDATE 
+('admin',   '管理员',      '拥有所有权限,不受部门限制',                    100, 1),
+('member',  '普通用户',    '普通用户,部门权限由 can_read 和 can_write 控制', 10, 1),
+('analyst', '数据分析师', '可以使用 Text2SQL 功能,访问 analytics 数据集', 10, 1)
+ON DUPLICATE KEY UPDATE
     name = VALUES(name),
     description = VALUES(description),
     priority = VALUES(priority);
@@ -54,20 +55,24 @@ ON DUPLICATE KEY UPDATE
 
 -- =============================================================================
 -- 2. 初始化权限点 (permissions)
--- 权限标识采用 "资源:操作:子操作" 命名规范
+-- 权限标识采用 "资源:操作:子操作" 载名规范
 -- =============================================================================
 INSERT INTO permissions (perm_key, name, description, resource, action, is_system) VALUES
 -- 知识库权限
-('kb:file:list',      '知识库文件列表',   '列出知识库文件',              'kb',    'list',     1),
-('kb:file:detail',    '知识库文件详情',   '查看知识库文件详情',          'kb',    'detail',   1),
-('kb:file:download',  '知识库文件下载',   '下载知识库文件',              'kb',    'download', 1),
-('kb:file:upload',    '知识库文件上传',   '上传/编辑知识库文件',         'kb',    'upload',   1),
-('kb:file:delete',    '知识库文件删除',   '删除知识库文件',              'kb',    'delete',   1),
+('kb:file:list',          '知识库文件列表',     '列出知识库文件',              'kb',    'list',     1),
+('kb:file:detail',        '知识库文件详情',     '查看知识库文件详情',          'kb',    'detail',   1),
+('kb:file:download',      '知识库文件下载',     '下载知识库文件',              'kb',    'download',  1),
+('kb:file:upload',        '知识库文件上传',     '上传/编辑知识库文件',         'kb',    'upload',   1),
+('kb:file:delete',        '知识库文件删除',     '删除知识库文件',              'kb',    'delete',   1),
 -- 管理员权限
-('admin:user:list',   '用户列表',         '列出所有用户',                'admin', 'list',     1),
-('admin:user:update', '用户更新',         '更新用户信息',                'admin', 'update',   1),
-('admin:dept:create', '创建部门',         '创建新部门',                  'admin', 'create',   1)
-ON DUPLICATE KEY UPDATE 
+('admin:user:list',       '用户列表',            '列出所有用户',                'admin', 'list',     1),
+('admin:user:update',     '用户更新',            '更新用户信息',                'admin', 'update',   1),
+('admin:dept:create',    '创建部门',            '创建新部门',                  'admin', 'create',   1),
+-- Text2SQL 权限
+('text2sql:use',            '使用 Text2SQL',      '使用 Text2SQL 功能生成和执行 SQL 查询',         'text2sql', 'use',            1),
+('text2sql:query_analytics', '查询 Analytics 数据集', '查询 analytics 脱敏数据集',                  'text2sql', 'query_analytics', 1),
+('text2sql:query_raw',       '查询原始数据库',       '查询原始数据库（仅 admin）',                 'text2sql', 'query_raw',       1)
+ON DUPLICATE KEY UPDATE
     name = VALUES(name),
     description = VALUES(description),
     resource = VALUES(resource),
@@ -87,7 +92,8 @@ CROSS JOIN permissions p
 WHERE r.role_key = 'admin'
   AND p.perm_key IN (
       'kb:file:list', 'kb:file:detail', 'kb:file:download', 'kb:file:upload', 'kb:file:delete',
-      'admin:user:list', 'admin:user:update', 'admin:dept:create'
+      'admin:user:list', 'admin:user:update', 'admin:dept:create',
+      'text2sql:use', 'text2sql:query_analytics', 'text2sql:query_raw'
   )
 ON DUPLICATE KEY UPDATE role_id = role_id;
 
@@ -100,6 +106,15 @@ WHERE r.role_key = 'member'
   AND p.perm_key IN (
       'kb:file:list', 'kb:file:detail', 'kb:file:download', 'kb:file:upload', 'kb:file:delete'
   )
+ON DUPLICATE KEY UPDATE role_id = role_id;
+
+-- analyst 角色拥有 Text2SQL 权限
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r
+CROSS JOIN permissions p
+WHERE r.role_key = 'analyst'
+  AND p.perm_key IN ('text2sql:use', 'text2sql:query_analytics')
 ON DUPLICATE KEY UPDATE role_id = role_id;
 
 
@@ -121,7 +136,7 @@ ON DUPLICATE KEY UPDATE
 -- 密码使用 bcrypt 哈希 (示例密码: "123456")
 -- 实际项目中请使用 Python 的 bcrypt 库生成哈希
 -- =============================================================================
--- 注意: 以下密码哈希是示例，实际使用时需要用 bcrypt 生成
+-- 注意: 以下密码哈希是示例,实际使用时需要用 bcrypt 生成
 -- 示例密码 "123456" 的 bcrypt 哈希 (cost=12)
 
 INSERT INTO users (username, password_hash, display_name, email, is_active) VALUES
@@ -135,7 +150,7 @@ ON DUPLICATE KEY UPDATE
 
 -- =============================================================================
 -- 6. 初始化用户-角色映射 (user_roles)
--- 所有用户都是 member，user-ryan 同时也是 admin
+-- 所有用户都是 member,user-ryan 同时也是 admin
 -- =============================================================================
 -- user-ryan -> admin + member
 INSERT INTO user_roles (user_id, role_id)
@@ -172,13 +187,13 @@ ON DUPLICATE KEY UPDATE user_id = user_id;
 -- =============================================================================
 -- 7. 初始化用户-部门访问权限映射 (user_departments)
 -- 部门权限通过 can_read 和 can_write 控制
--- - user-ryan (admin): 所有部门（读写权限），admin 不受部门限制但设置默认部门
+-- - user-ryan (admin): 所有部门（读写权限）,admin 不受部门限制但设置默认部门
 -- - user1 (member): micro_service (读写权限), AI (只读权限)
 -- - user2 (member): database (只读权限)
 -- =============================================================================
 
 -- user-ryan (admin) -> 所有部门 (读写权限)
--- 注意: admin 角色在业务逻辑层不受部门限制，但这里仍可以设置默认部门
+-- 注意: admin 角色在业务逻辑层不受部门限制,但这里仍可以设置默认部门
 INSERT INTO user_departments (user_id, department_id, can_read, can_write)
 SELECT u.id, d.id, 1, 1
 FROM users u
