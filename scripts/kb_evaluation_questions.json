@@ -1,0 +1,82 @@
+[
+  {
+    "input": "什么是 CKafka？",
+    "expected_output": "CKafka 是腾讯云提供的分布式消息队列服务",
+    "metadata": {
+      "category": "产品介绍",
+      "difficulty": "简单"
+    }
+  },
+  {
+    "input": "CKafka 支持哪些消息协议？",
+    "expected_output": "CKafka 支持 Kafka 协议、MQTT 协议",
+    "metadata": {
+      "category": "功能特性",
+      "difficulty": "简单"
+    }
+  },
+  {
+    "input": "如何使用 CKafka？",
+    "expected_output": "可以通过腾讯云控制台、API、SDK 等方式使用 CKafka",
+    "metadata": {
+      "category": "使用指南",
+      "difficulty": "中等"
+    }
+  },
+  {
+    "input": "CKafka 的计费方式是什么？",
+    "expected_output": "CKafka 支持按量计费和包年包月两种计费方式",
+    "metadata": {
+      "category": "计费说明",
+      "difficulty": "中等"
+    }
+  },
+  {
+    "input": "CKafka 和 RabbitMQ 有什么区别？",
+    "expected_output": "CKafka 是分布式消息队列服务，支持高吞吐、高可用；RabbitMQ 是消息中间件，适合企业级应用",
+    "metadata": {
+      "category": "产品对比",
+      "difficulty": "困难"
+    }
+  },
+  {
+    "input": "CKafka 的高可用架构是怎样的？",
+    "expected_output": "CKafka 采用多副本机制，支持跨可用区部署，提供 99.95% 的可用性保证",
+    "metadata": {
+      "category": "架构设计",
+      "difficulty": "困难"
+    }
+  },
+  {
+    "input": "CKafka 如何保证消息顺序性？",
+    "expected_output": "CKafka 通过分区（Partition）机制，同一分区内消息有序，并通过 Key 确保相关消息发送到同一分区",
+    "metadata": {
+      "category": "技术原理",
+      "difficulty": "困难"
+    }
+  },
+  {
+    "input": "CKafka 支持哪些语言的 SDK？",
+    "expected_output": "CKafka 支持 Java、Python、Go、C++、Node.js 等多种语言的 SDK",
+    "metadata": {
+      "category": "开发指南",
+      "difficulty": "中等"
+    }
+  },
+  {
+    "input": "CKafka 的消息保留时间是多久？",
+    "expected_output": "CKafka 支持自定义消息保留时间，最长可保留 7 天",
+    "metadata": {
+      "category": "配置说明",
+      "difficulty": "中等"
+    }
+  },
+  {
+    "input": "如何监控 CKafka 的运行状态？",
+    "expected_output": "可以通过腾讯云监控平台、日志服务、自定义监控接口等方式监控 CKafka 的运行状态",
+    "metadata": {
+      "category": "运维监控",
+      "difficulty": "中等"
+    }
+  }
+]

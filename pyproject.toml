@@ -67,6 +67,7 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "pypdf2>=3.0.1",
     "bcrypt==4.3.0",
+    "ragas>=0.2.0",
 ]
 
 [dependency-groups]
